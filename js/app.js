@@ -506,6 +506,7 @@ function renderPlan(main) {
         <button class="btn" id="sample">✨ Load sample 16-week plan</button>
         ${items.length ? `<button class="btn danger" id="clear">Clear plan</button>` : ''}
       </div>
+      <div id="bundled"></div>
       <div id="import" ${ui.importOpen ? '' : 'hidden'}>
         <p class="small">Paste rows from Excel/Google Sheets or upload a .csv. Columns: <code>date</code> <em>or</em> <code>week</code> + <code>day</code>, then <code>category</code>, <code>title</code>, <code>details</code>, <code>distance</code>, <code>duration</code>, <code>run_type</code>.
         Categories: ${Object.keys(CATEGORIES).map(k => `<code>${k}</code>`).join(' ')}. Week/day rows use your plan start date${S().startDate ? ` (${esc(fmtDate(S().startDate))})` : ' — <a href="#settings">set it in Settings</a>'}.</p>
@@ -561,6 +562,7 @@ function renderPlan(main) {
     store.addItems(plan);
     route();
   };
+  loadBundledPlans($('#bundled'), items.length);
   const clear = $('#clear');
   if (clear) clear.onclick = () => {
     if (confirm('Delete every activity in your plan? (Check-ins and settings are kept. Consider exporting a backup first.)')) { store.clearItems(); route(); }
@@ -570,6 +572,37 @@ function renderPlan(main) {
     if (!b) return;
     const it = items.find(i => i.id === b.closest('[data-id]').dataset.id);
     if (it) openEditDialog(it);
+  });
+}
+
+/** Ready-made plans shipped in /plans (listed in plans/index.json). */
+async function loadBundledPlans(el, existing) {
+  let list;
+  try { list = await (await fetch('plans/index.json')).json(); } catch { return; }
+  if (!list?.length || !el.isConnected) return;
+  el.innerHTML = `<h3 class="bundled-head">Ready-made plans</h3>${list.map((p, i) => `
+    <div class="bundled-plan">
+      <div><b>${esc(p.name)}</b><br><span class="muted small">${esc(p.description)}</span></div>
+      <button class="btn primary small" data-plan="${i}">Load</button>
+    </div>`).join('')}`;
+  el.addEventListener('click', async e => {
+    const b = e.target.closest('[data-plan]');
+    if (!b) return;
+    const meta = list[+b.dataset.plan];
+    b.disabled = true;
+    try {
+      const plan = await (await fetch(`plans/${meta.file}`)).json();
+      const msg = `Load "${plan.name}" (${plan.items.length} activities)?` +
+        (existing ? `\n\nThis REPLACES your current plan of ${existing} activities. Check-ins are kept.` : '') +
+        (plan.settings?.raceDate ? `\n\nRace date will be set to ${fmtDate(plan.settings.raceDate)}.` : '');
+      if (!confirm(msg)) return;
+      if (existing) store.clearItems();
+      if (plan.settings) store.updateSettings(plan.settings);
+      store.addItems(plan.items);
+      route();
+    } catch (err) {
+      alert(`Could not load the plan: ${err.message}`);
+    } finally { b.disabled = false; }
   });
 }
 

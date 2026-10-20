@@ -17,6 +17,15 @@ There's no account and no server. Your data stays in your browser on your device
 - **Settings**: race name and date (shown as a countdown with "Week N of M"), plan start date, miles/km, Monday or Sunday week start, JSON backup/restore and CSV export.
 - Works offline and can be installed to your home screen (PWA).
 
+## Ready-made plans
+
+**Plan → Ready-made plans** lists the plans in [`plans/`](plans/). Tap **Load** and the plan, race name and race date are set up in one step.
+
+- **Sub-3:10 Marathon, Long Island 2027** (`plans/sub-3-10-long-island-2027.*`): an 11-week base block from Oct 12, 2026, then an 18-week build to Sun May 2, 2027. Every day includes the run (with paces), strength sessions, post-run mobility, fueling targets, benchmarks and race-week tasks. Weekly mileage matches the plan (45 → 65 peak → 24 + race). Workout notes say which build week they belong to ("Build week 3 of 18"). The app counts weeks from the Oct 12 base start, so build week 1 shows as W12.
+  The same plan is also in `.csv` for spreadsheets. To change it, edit `plans/build_sub310.py` and run `python3 plans/build_sub310.py`.
+
+To add your own: put a JSON file in `plans/` (`{ name, description, settings, items }`, the same shape as the generated one) and list it in `plans/index.json`.
+
 ## Running it
 
 It's plain HTML/CSS/JavaScript with no build step and no dependencies. Because it uses JavaScript modules, it has to be served over HTTP rather than opened as a file:
@@ -61,6 +70,7 @@ js/store.js           data model, localStorage persistence, date/pace helpers
 js/plans.js           CSV import and the sample 16-week plan
 js/charts.js          SVG charts + tooltips
 js/app.js             views: Today, Calendar, Plan, Progress, Settings
+plans/                ready-made plans (+ the script that generates the Sub-3:10 plan)
 sw.js                 offline cache
 manifest.webmanifest  install-to-home-screen metadata
 ```
