@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Marathon Planner</title>
+  <meta name="description" content="Plan, schedule and track your marathon training: runs, strength, mobility, nutrition and recovery.">
+  <meta name="theme-color" content="#2a78d6">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon.svg">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#today"><img src="icons/icon.svg" alt="" width="28" height="28"> Marathon Planner</a>
+    <div id="race-banner" class="race-banner"></div>
+  </header>
+
+  <nav class="nav" aria-label="Main">
+    <a href="#today"><span aria-hidden="true">☀️</span>Today</a>
+    <a href="#calendar"><span aria-hidden="true">📅</span>Calendar</a>
+    <a href="#plan"><span aria-hidden="true">📝</span>Plan</a>
+    <a href="#progress"><span aria-hidden="true">📈</span>Progress</a>
+    <a href="#settings"><span aria-hidden="true">⚙️</span>Settings</a>
+  </nav>
+
+  <main id="view" class="view"></main>
+
+  <dialog id="dialog"></dialog>
+
+  <noscript>This app needs JavaScript enabled.</noscript>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
