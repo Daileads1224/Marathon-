@@ -374,3 +374,25 @@ dialog.confirm { width: min(420px, calc(100vw - 32px)); }
 .proposal { border-color: var(--accent); }
 .proposal p { margin: 0 0 .5rem; }
 .changes { margin: 0 0 .5rem; padding-left: 1.1rem; font-size: .9rem; color: var(--ink-2); }
+
+/* ---------- Strava ---------- */
+.strava-bar { display: flex; align-items: center; gap: .6rem; padding: .55rem .75rem; margin-bottom: 1rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); font-size: .9rem; }
+.strava-bar .strava-text { flex: 1; min-width: 0; color: var(--ink-2); }
+.strava-bar.is-error { border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.strava-bar.is-error .strava-text { color: var(--danger); }
+.strava-mark { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: var(--c-strength); color: #fff; font-weight: 800; font-size: .8rem; }
+.strava-detail { display: grid; gap: .45rem; border: 1px solid var(--border); border-radius: 10px; padding: .65rem .75rem; background: var(--page); }
+.strava-detail p { margin: 0; }
+.strava-head { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; font-weight: 600; font-size: .9rem; }
+.zones { display: flex; height: 12px; border-radius: 6px; overflow: hidden; gap: 2px; background: var(--surface-2); }
+.zones .z { display: block; min-width: 3px; }
+.zone-legend { display: flex; flex-wrap: wrap; gap: .3rem .8rem; font-size: .78rem; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.zone-legend span { display: inline-flex; align-items: center; gap: .3rem; }
+.zone-legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+/* Heart-rate zones: one blue ramp, light (easy) to dark (hard). */
+.z1 { background: #b7d3f6; } .z2 { background: #6da7ec; } .z3 { background: #2a78d6; } .z4 { background: #1c5cab; } .z5 { background: #0d366b; }
+/* Dark mode: brighter means harder, so the ramp runs dark (easy) to light (hard). */
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .z1 { background: #184f95; } :root:not([data-theme="light"]) .z2 { background: #256abf; } :root:not([data-theme="light"]) .z3 { background: #3987e5; } :root:not([data-theme="light"]) .z4 { background: #6da7ec; } :root:not([data-theme="light"]) .z5 { background: #b7d3f6; } }
+:root[data-theme="dark"] .z1 { background: #184f95; } :root[data-theme="dark"] .z2 { background: #256abf; } :root[data-theme="dark"] .z3 { background: #3987e5; } :root[data-theme="dark"] .z4 { background: #6da7ec; } :root[data-theme="dark"] .z5 { background: #b7d3f6; }
+.laps { font-size: .82rem; }
+.laps td, .laps th { padding: .25rem .4rem; }

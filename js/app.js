@@ -6,6 +6,7 @@ import {
 import { importCSV, samplePlan, CSV_TEMPLATE } from './plans.js';
 import { weeklyVolumeChart, completionBars, bindTooltips } from './charts.js';
 import { getSample, coachRun, coachError, describeChange, applyProposal, pendingProposals } from './coach.js';
+import { getMcp, syncStrava, stravaError, isSyncing } from './strava.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -19,6 +20,7 @@ const ui = {
   showPast: false,
   importOpen: false,
   flash: '',
+  strava: { available: false, msg: '', error: false },
 };
 
 const S = () => store.get().settings;
@@ -68,6 +70,7 @@ function itemMeta(it) {
     if (a.distance) done.push(`${a.distance} ${unit()}`);
     if (a.duration) done.push(fmtDuration(a.duration));
     if (a.distance && a.duration) done.push(fmtPace(a.duration, a.distance));
+    if (a.hr) done.push(`${a.hr} bpm`);
     if (a.rpe) done.push(`RPE ${a.rpe}`);
     if (done.length) bits.push(`✓ ${done.join(' · ')}`);
   }
@@ -224,6 +227,88 @@ function bindDayList(root) {
   });
 }
 
+// ---------- Strava ----------
+
+function ago(iso) {
+  if (!iso) return 'never';
+  const min = Math.round((Date.now() - new Date(iso)) / 60000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} min ago`;
+  const h = Math.round(min / 60);
+  return h < 24 ? `${h} h ago` : `${Math.round(h / 24)} d ago`;
+}
+
+function stravaBarHTML() {
+  if (!ui.strava.available) return '';
+  const st = store.get().strava || {};
+  const busy = isSyncing();
+  return `<div class="strava-bar ${ui.strava.error ? 'is-error' : ''}" role="status">
+    <span class="strava-mark" aria-hidden="true">S</span>
+    <span class="strava-text">${esc(ui.strava.msg || (st.lastSyncAt ? `Strava synced ${ago(st.lastSyncAt)}` : 'Bring in your runs from Strava'))}</span>
+    <button class="btn small" data-strava-sync ${busy ? 'disabled' : ''}>${busy ? 'Syncing…' : st.lastSyncAt ? 'Sync' : 'Connect & sync'}</button>
+  </div>`;
+}
+
+/** Sync Strava, then coach the runs from the last few days that have no coaching yet. */
+async function runSync() {
+  if (isSyncing()) return;
+  ui.strava = { ...ui.strava, msg: 'Checking Strava…', error: false };
+  route();
+  try {
+    const { imported } = await syncStrava({ onProgress: msg => { ui.strava.msg = msg; route(); } });
+    ui.strava.msg = imported.length ? `Imported ${imported.length} run${imported.length === 1 ? '' : 's'} from Strava` : 'No new runs on Strava';
+    route();
+    const recent = imported.filter(r => r.date >= addDays(today(), -3) && !store.get().coaching[r.itemId]);
+    if (recent.length && await getSample()) {
+      for (const [n, r] of recent.entries()) {
+        const run = store.get().items.find(i => i.id === r.itemId);
+        if (!run) continue;
+        ui.strava.msg = `Coaching run ${n + 1} of ${recent.length}…`; route();
+        try {
+          const note = await coachRun(run);
+          toast(`Coach: ${note.headline}`);
+        } catch (e) {
+          ui.strava.msg = coachError(e); route();
+          if (['not_granted', 'sampling_disabled', 'rate_limited'].includes(e?.code)) break;
+        }
+      }
+      ui.strava.msg = '';
+    }
+  } catch (e) {
+    ui.strava = { ...ui.strava, msg: stravaError(e), error: true };
+  }
+  route();
+}
+
+let autoSynced = false;
+/** Once per visit, sync automatically if Strava was synced before and not in the last 30 minutes. */
+function maybeAutoSync() {
+  if (autoSynced || cloud.status !== 'ready' || !ui.strava.available) return;
+  autoSynced = true;
+  const last = store.get().strava?.lastSyncAt;
+  if (last && Date.now() - new Date(last) > 30 * 60000) runSync();
+}
+
+function stravaDetailsHTML(it) {
+  const a = it.actual || {}, an = a.analysis;
+  if (!a.stravaId || !an) return '';
+  const zones = an.hrZones;
+  const zoneBar = zones ? `<div class="zones" role="img" aria-label="Time in heart-rate zones: ${zones.percent.map((p, i) => `Zone ${i + 1} ${p}%`).join(', ')}">
+      ${zones.percent.map((p, i) => p ? `<span class="z z${i + 1}" style="flex:${p}" data-tip="${esc(`<b>Zone ${i + 1}</b> (${zones.boundsBpm[i][0]}${zones.boundsBpm[i][1] ? `–${zones.boundsBpm[i][1]}` : '+'} bpm)<br>${fmtDuration(zones.seconds[i])} · ${p}%`)}"></span>` : '').join('')}
+    </div>
+    <div class="zone-legend">${zones.percent.map((p, i) => `<span><i class="z z${i + 1}"></i>Z${i + 1} ${p}%</span>`).join('')}</div>` : '';
+  const laps = an.laps?.length > 1 ? `<div class="table-wrap"><table class="laps">
+      <thead><tr><th>Lap</th><th class="num">Dist</th><th class="num">Time</th><th class="num">Pace</th><th class="num">HR</th></tr></thead>
+      <tbody>${an.laps.map((l, i) => `<tr><td>${i + 1}</td><td class="num">${l.dist ?? ''}</td><td class="num">${esc(fmtDuration(l.time))}</td><td class="num">${esc(l.pace ?? '')}</td><td class="num">${l.hr ?? ''}</td></tr>`).join('')}</tbody>
+    </table></div>` : '';
+  return `<section class="strava-detail">
+    <p class="strava-head"><span class="strava-mark" aria-hidden="true">S</span> From Strava${a.stravaName ? `: ${esc(a.stravaName)}` : ''}
+      · <a href="https://www.strava.com/activities/${esc(a.stravaId)}" target="_blank" rel="noopener">View on Strava</a></p>
+    <p class="small muted">${[a.hr && `Avg HR ${a.hr}`, a.maxHr && `max ${a.maxHr}`, an.cadenceStepsPerMin && `${an.cadenceStepsPerMin} spm`, an.elevationGainMeters != null && `${unit() === 'mi' ? Math.round(an.elevationGainMeters * 3.281) + ' ft' : an.elevationGainMeters + ' m'} climb`].filter(Boolean).join(' · ')}</p>
+    ${zoneBar}${laps}
+  </section>`;
+}
+
 // ---------- Today ----------
 
 function renderToday(main) {
@@ -255,6 +340,7 @@ function renderToday(main) {
       </button>`;
     }).join('')}</div>
 
+    ${stravaBarHTML()}
     ${proposalsHTML()}
 
     <section class="card">
@@ -290,6 +376,8 @@ function renderToday(main) {
   $('#add-here').onclick = () => openItemDialog(null, d);
   bindDayList($('#day-list'));
   bindProposals(main);
+  const syncBtn = $('[data-strava-sync]', main);
+  if (syncBtn) syncBtn.onclick = runSync;
 
   const form = $('#checkin');
   form.addEventListener('change', () => {
@@ -441,6 +529,7 @@ function openLogDialog(it) {
     </header>
     <p class="muted">${esc(fmtDate(it.date, { weekday: 'long', month: 'long', day: 'numeric' }))}${itemMeta({ ...it, done: false }) ? ' · ' + esc(itemMeta({ ...it, done: false })) : ''}</p>
     ${it.details ? `<div class="details-box">${esc(it.details)}</div>` : ''}
+    ${stravaDetailsHTML(it)}
     <form id="log-form" class="grid-form">
       <label class="span-all toggle"><input type="checkbox" name="done" ${it.done ? 'checked' : ''}> <span>Completed</span></label>
       ${isRun ? `<label>Distance (${unit()})<input type="number" step="0.01" min="0" name="distance" value="${esc(a.distance)}" placeholder="${esc(p.distance ?? '')}"></label>` : ''}
@@ -464,6 +553,7 @@ function openLogDialog(it) {
       $('#pace-out', dlg).textContent = pace ? `Pace: ${pace}` : '';
     };
     form.addEventListener('input', updatePace); updatePace();
+    bindTooltips(dlg);
     $('[data-edit]', dlg).onclick = () => openEditDialog(it);
     const coachBtn = $('[data-coach]', dlg);
     if (coachBtn) getSample().then(sample => {
@@ -911,6 +1001,7 @@ store.subscribe(() => {
   const view = location.hash.slice(1) || 'today';
   const active = document.activeElement;
   renderSync();
+  maybeAutoSync();
   if (view === 'setup') {
     if (!active?.closest('#settings, textarea, input')) route();
     return;
@@ -924,6 +1015,10 @@ dialog().addEventListener('close', () => { dayDialogRefresh = null; });
 window.addEventListener('hashchange', route);
 route();
 connectCloud();
+getMcp().then(mcp => {
+  ui.strava.available = !!mcp && cloud.mode === 'cloud';
+  if (ui.strava.available) { route(); maybeAutoSync(); }
+});
 
 // Offline support only for the GitHub Pages copy; claude.ai pages don't allow service workers.
 if (!window.claude && 'serviceWorker' in navigator && location.protocol.startsWith('http')) {

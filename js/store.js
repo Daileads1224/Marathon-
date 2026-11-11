@@ -6,6 +6,7 @@
 //   - claude.ai `db`: when the app runs as a claude.ai artifact, the real store,
 //     shared across devices and readable/writable by Claude. Documents:
 //       plan/settings            race + preferences
+//       plan/strava              Strava sync status (last sync, heart-rate zones)
 //       weeks/<monday>           { items: [...] } every activity in that Mon–Sun week
 //       checkins/<YYYY-MM>       { days: { '2026-11-11': {...} } }
 //       coaching/<itemId>        a coaching note for one activity
@@ -36,6 +37,7 @@ const DEFAULT_STATE = {
   logs: {},
   coaching: {},
   proposals: {},
+  strava: {},
 };
 
 let state = loadCache();
@@ -67,6 +69,7 @@ function normalize(s) {
     logs: obj(s.logs),
     coaching: obj(s.coaching),
     proposals: obj(s.proposals),
+    strava: obj(s.strava),
   };
 }
 
@@ -98,6 +101,7 @@ const monthPath = iso => `checkins/${iso.slice(0, 7)}`;
 /** The body a document should have right now, or null to delete it. */
 function bodyFor(path) {
   const [col, id] = path.split('/');
+  if (col === 'plan' && id === 'strava') return Object.keys(state.strava).length ? { ...state.strava } : null;
   if (col === 'plan') return { ...state.settings };
   if (col === 'weeks') {
     const items = state.items.filter(i => weekKey(i.date) === id);
@@ -115,6 +119,7 @@ function bodyFor(path) {
 function allPaths(s = state) {
   return [
     'plan/settings',
+    ...(Object.keys(s.strava).length ? ['plan/strava'] : []),
     ...s.items.map(i => weekPath(i.date)),
     ...Object.keys(s.logs).map(monthPath),
     ...Object.keys(s.coaching).map(id => `coaching/${id}`),
@@ -182,7 +187,7 @@ export async function connectCloud() {
   db = handle;
 
   const seen = new Set();
-  const expect = ['plan', 'weeks', 'checkins', 'coaching', 'proposals'];
+  const expect = ['plan', 'strava', 'weeks', 'checkins', 'coaching', 'proposals'];
   const timer = setTimeout(() => {
     if (cloud.status === 'connecting') setStatus('offline', "Can't reach your saved data yet. Showing what's on this device.");
   }, 10000);
@@ -196,6 +201,12 @@ export async function connectCloud() {
   db.doc('plan/settings').onSnapshot(snap => {
     if (!busy('plan/settings') && snap.exists) state.settings = { ...DEFAULT_STATE.settings, ...snap.data() };
     ready('plan', snap.metadata);
+    saveCache(); notify();
+  }, fail);
+
+  db.doc('plan/strava').onSnapshot(snap => {
+    if (!busy('plan/strava')) state.strava = snap.exists ? { ...snap.data() } : {};
+    ready('strava', snap.metadata);
     saveCache(); notify();
   }, fail);
 
@@ -306,6 +317,8 @@ export const store = {
     state.proposals[id] = { ...state.proposals[id], ...patch };
     commit([`proposals/${id}`]);
   },
+
+  setStrava(patch) { state.strava = { ...state.strava, ...patch }; commit(['plan/strava']); },
 
   replaceAll(next) {
     const old = allPaths();
