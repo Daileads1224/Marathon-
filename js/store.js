@@ -78,6 +78,9 @@ function normalize(s) {
 
 // Coalesce re-renders: a burst of saves and cloud snapshots becomes one render.
 let notifyTimer = null;
+// Snapshots deliver frozen objects; the app edits its state in place, so it keeps its own copies.
+const copy = v => (v == null ? v : structuredClone(v));
+
 const notify = () => {
   if (notifyTimer) return;
   notifyTimer = setTimeout(() => { notifyTimer = null; listeners.forEach(fn => fn(state)); }, 16);
@@ -208,20 +211,20 @@ export async function connectCloud() {
   const fail = e => setStatus('error', e?.code === 'revoked' ? 'Access to your saved data was withdrawn.' : `Lost the connection to your saved data (${e?.code}). Reload to reconnect.`);
 
   db.doc('plan/settings').onSnapshot(snap => {
-    if (!busy('plan/settings') && snap.exists) state.settings = { ...DEFAULT_STATE.settings, ...snap.data() };
+    if (!busy('plan/settings') && snap.exists) state.settings = { ...DEFAULT_STATE.settings, ...copy(snap.data()) };
     ready('plan', snap.metadata);
     saveCache(); notify();
   }, fail);
 
   db.doc('plan/strava').onSnapshot(snap => {
-    if (!busy('plan/strava')) state.strava = snap.exists ? { ...snap.data() } : {};
+    if (!busy('plan/strava')) state.strava = snap.exists ? copy(snap.data()) : {};
     ready('strava', snap.metadata);
     saveCache(); notify();
   }, fail);
 
   // Collections map document id -> body; documents with an unsaved local change keep the local copy.
   const watch = (col, apply) => db.collection(col).onSnapshot(snap => {
-    const docs = Object.fromEntries(snap.docs.map(d => [d.id, d.data()]));
+    const docs = Object.fromEntries(snap.docs.map(d => [d.id, copy(d.data())]));
     apply(docs);
     ready(col, snap.metadata);
     saveCache(); notify();

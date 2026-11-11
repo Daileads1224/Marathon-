@@ -121,7 +121,7 @@ export function renderStrength(main, ctx) {
   const { esc } = ctx;
   const t = today();
   const all = store.get().items.filter(i => i.category === 'strength').sort(sortByDate);
-  const nextUp = all.find(i => i.date === t) || all.find(i => i.date > t && !i.done) || all.find(i => i.date > t);
+  const nextUp = all.find(i => i.date >= t);
   const upcoming = all.filter(i => i.date >= t && i !== nextUp).slice(0, 6);
   const month = t.slice(0, 7);
   const monthItems = all.filter(i => i.date.startsWith(month) && i.date <= t);
