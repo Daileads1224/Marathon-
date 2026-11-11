@@ -15,7 +15,8 @@ Garmin only receives pace targets when the Intervals.icu Run sport settings have
 pace. Workouts sent before it was set need --recreate to be exported to Garmin again.
 """
 import argparse, json, os, re, subprocess, sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 API = 'https://intervals.icu/api/v1/athlete/0'
 TAG = 'marathon-planner'
@@ -166,13 +167,16 @@ def curl(method, url, body=None):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('weeks_dir')
-    ap.add_argument('--from', dest='start', default=date.today().isoformat())
+    # Scheduled runs happen on UTC machines; 'today' means today where the athlete is.
+    ap.add_argument('--tz', default='America/New_York')
+    ap.add_argument('--from', dest='start', default=None)
     ap.add_argument('--days', type=int, default=21)
     ap.add_argument('--unit', default='mi', choices=['mi', 'km'])
     ap.add_argument('--post', action='store_true')
     ap.add_argument('--recreate', action='store_true',
                     help='delete and re-create this window\'s workouts so Intervals.icu sends them to Garmin again')
     a = ap.parse_args()
+    a.start = a.start or datetime.now(ZoneInfo(a.tz)).date().isoformat()
     end = (date.fromisoformat(a.start) + timedelta(days=a.days - 1)).isoformat()
 
     runs = [i for i in load_items(a.weeks_dir)

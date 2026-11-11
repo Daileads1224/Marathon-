@@ -5,7 +5,7 @@ import {
 } from './store.js';
 import { importCSV, samplePlan, CSV_TEMPLATE } from './plans.js';
 import { weeklyVolumeChart, completionBars, bindTooltips } from './charts.js';
-import { getSample, coachRun, coachError, describeChange, applyProposal, pendingProposals } from './coach.js';
+import { getSample, coachRun, coachError, describeChange, applyProposal, pendingProposals, proposeChange } from './coach.js';
 import { getMcp, syncStrava, stravaError, isSyncing } from './strava.js';
 import { renderRunning, renderStrength, renderStretching, weekPhase } from './tabs.js';
 import { renderNutrition } from './nutrition.js';
@@ -26,6 +26,7 @@ const ui = {
   importOpen: false,
   flash: '',
   strava: { available: false, msg: '', error: false },
+  canAsk: false,           // Claude is available on this page (plan-change requests)
 };
 
 const S = () => store.get().settings;
@@ -364,7 +365,10 @@ function renderToday(main) {
     <section class="card">
       <div class="card-head">
         <h3>Plan ${items.length ? `<span class="muted">${done}/${items.length} done</span>` : ''}</h3>
-        <button class="btn small primary" id="add-here">+ Add</button>
+        <div class="btn-row tight">
+          ${ui.canAsk ? '<button class="btn small" data-change-plan>Change my plan</button>' : ''}
+          <button class="btn small primary" id="add-here">+ Add</button>
+        </div>
       </div>
       ${items.length ? `<div class="progress-line"><span style="width:${(done / items.length) * 100}%"></span></div>` : ''}
       <div id="day-list">${dayListHTML(d)}</div>
@@ -392,6 +396,7 @@ function renderToday(main) {
     if (day) { ui.date = day.dataset.day; return route(); }
   });
   $('#add-here').onclick = () => openItemDialog(null, d);
+  $('[data-change-plan]', main)?.addEventListener('click', openChangeDialog);
   bindDayList($('#day-list'));
   bindProposals(main);
   const syncBtn = $('[data-strava-sync]', main);
@@ -528,12 +533,14 @@ function renderCalendar(main) {
       </div>
       <div class="btn-row tight">
         ${season ? '' : '<button class="btn small" data-step="0">Today</button>'}
+        ${ui.canAsk ? '<button class="btn small" data-change-plan>Change my plan</button>' : ''}
         <button class="btn small primary" data-add="${ui.calMode === 'week' ? startOfWeek(ui.date) : today()}">+ Add</button>
       </div>
     </div>
     ${season ? '' : `<div class="chips-row">${filters}</div>`}
     ${body}`;
   bindProposals(main);
+  $('[data-change-plan]', main)?.addEventListener('click', openChangeDialog);
   const past = $('#show-past', main);
   if (past) past.onchange = e => { ui.showPast = e.target.checked; route(); };
   if (season) requestAnimationFrame(() => $('.season tr.is-current', main)?.scrollIntoView({ block: 'nearest' }));
@@ -615,7 +622,14 @@ function openLogDialog(it) {
     </form>
     ${isRun ? `<div id="coach-box">${coachHTML(store.get().coaching[it.id])}</div>
       <div class="btn-row" id="coach-row" hidden><button class="btn small" data-coach>${store.get().coaching[it.id] ? 'Coach this run again' : 'Get coaching'}</button><span class="muted small" id="coach-status"></span></div>` : ''}
+    ${it.done ? '' : `<div class="move-row" hidden>
+      <span class="small muted">Move to</span>
+      <button class="btn small" data-move-to="${addDays(it.date, 1)}">${esc(fmtDate(addDays(it.date, 1), { weekday: 'short', month: 'short', day: 'numeric' }))}</button>
+      <input type="date" id="move-date" value="${esc(addDays(it.date, 2))}" min="${esc(today())}" aria-label="Move to date">
+      <button class="btn small" data-move-pick>Move</button>
+    </div>`}
     <footer class="dlg-foot">
+      ${it.done ? '' : '<button class="btn" data-move>Move</button>'}
       <button class="btn" data-edit>Edit plan</button>
       <button class="btn primary" data-save>Save</button>
     </footer>`,
@@ -629,6 +643,15 @@ function openLogDialog(it) {
     form.addEventListener('input', updatePace); updatePace();
     bindTooltips(dlg);
     $('[data-edit]', dlg).onclick = () => openEditDialog(it);
+    const moveTo = date => {
+      if (!isValidISO(date)) return;
+      store.updateItem(it.id, { date });
+      toast(`Moved ${it.title} to ${fmtDate(date, { weekday: 'long', month: 'short', day: 'numeric' })}.`);
+      afterDialogChange();
+    };
+    $('[data-move]', dlg)?.addEventListener('click', () => { const r = $('.move-row', dlg); r.hidden = !r.hidden; });
+    $('[data-move-to]', dlg)?.addEventListener('click', e => moveTo(e.currentTarget.dataset.moveTo));
+    $('[data-move-pick]', dlg)?.addEventListener('click', () => moveTo($('#move-date', dlg).value));
     const coachBtn = $('[data-coach]', dlg);
     if (coachBtn) getSample().then(sample => {
       if (!sample || !dlg.contains(coachBtn)) return;
@@ -674,6 +697,45 @@ async function runCoaching(itemId, dlg) {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Coach this run again'; }
   }
+}
+
+const CHANGE_IDEAS = [
+  "I can't run today. Move today's run to tomorrow.",
+  "I'm short on time tomorrow. Swap tomorrow's run with the next easy day.",
+  "Move this weekend's long run to Saturday.",
+  "I'm traveling Friday to Sunday. Keep the key sessions and shorten the rest.",
+];
+
+function openChangeDialog() {
+  let ctl = null;
+  showDialog(`
+    <header class="dlg-head"><h2>Change my plan</h2><button class="icon-btn" data-close aria-label="Close">${ICON_CLOSE}</button></header>
+    <p class="muted small">Tell your coach what's changed. You'll get a suggested change to accept or dismiss; nothing moves until you accept.</p>
+    <div class="idea-row">${CHANGE_IDEAS.map((q, i) => `<button class="chip plain" data-idea="${i}">${esc(q)}</button>`).join('')}</div>
+    <label class="block-label"><span class="sr-only">What's changed?</span>
+      <textarea id="change-text" rows="4" placeholder="e.g. I can't run today. Move today's run to tomorrow."></textarea></label>
+    <p class="small" id="change-status" role="status"></p>
+    <footer class="dlg-foot"><button class="btn" data-close>Cancel</button><button class="btn primary" data-send>Suggest changes</button></footer>`,
+  dlg => {
+    const text = $('#change-text', dlg), status = $('#change-status', dlg), send = $('[data-send]', dlg);
+    $$('[data-idea]', dlg).forEach(b => (b.onclick = () => { text.value = CHANGE_IDEAS[+b.dataset.idea]; text.focus(); }));
+    dlg.addEventListener('close', () => ctl?.abort(), { once: true });
+    send.onclick = async () => {
+      const request = text.value.trim();
+      if (!request) { status.textContent = "Describe what's changed first."; text.focus(); return; }
+      send.disabled = true; status.textContent = 'Reworking your plan…';
+      ctl = new AbortController();
+      try {
+        const res = await proposeChange(request, { signal: ctl.signal });
+        if (res.none) { status.textContent = res.none; return; }
+        dlg.close();
+        toast('Suggested change ready. Review it at the top of the page.');
+        route();
+      } catch (e) {
+        if (e?.code !== 'cancelled') status.textContent = coachError(e);
+      } finally { send.disabled = false; }
+    };
+  });
 }
 
 function openEditDialog(it, date) {
@@ -1049,6 +1111,7 @@ document.addEventListener('focusout', () => setTimeout(() => {
 window.addEventListener('hashchange', route);
 route();
 connectCloud();
+getSample().then(sample => { ui.canAsk = !!sample; if (sample) route(); });
 getMcp().then(mcp => {
   ui.strava.available = !!mcp && cloud.mode === 'cloud';
   if (ui.strava.available) { route(); maybeAutoSync(); }

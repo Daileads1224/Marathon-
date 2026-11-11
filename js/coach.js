@@ -1,6 +1,6 @@
 // Run coaching and plan-change proposals, using Claude through the artifact's `sample` capability.
 
-import { store, CATEGORIES, RUN_TYPES, addDays, today, fmtDuration, fmtPace, num } from './store.js';
+import { store, CATEGORIES, RUN_TYPES, addDays, today, fmtDate, fmtDuration, fmtPace, num } from './store.js';
 
 let samplePromise = null;
 /** Resolves the `sample` function, or null when Claude isn't available on this page. */
@@ -131,15 +131,66 @@ export function validateProposal(p) {
 /** Plain-language description of one change, for the proposal card. */
 export function describeChange(c) {
   const it = store.get().items.find(i => i.id === c.id);
-  const name = it ? `${it.title} (${it.date})` : 'an activity';
+  const day = d => fmtDate(d, { weekday: 'short', month: 'short', day: 'numeric' });
+  const name = it ? `${it.title} (${day(it.date)})` : 'an activity';
   if (c.op === 'delete') return `Remove ${name}`;
-  if (c.op === 'add') return `Add ${c.title} on ${c.date}${c.distance ? ` · ${c.distance} ${store.get().settings.units}` : ''}`;
+  if (c.op === 'add') return `Add ${c.title} on ${day(c.date)}${c.distance ? ` · ${c.distance} ${store.get().settings.units}` : ''}`;
   const bits = [];
-  if (c.date && it && c.date !== it.date) bits.push(`move to ${c.date}`);
+  if (c.date && it && c.date !== it.date) bits.push(`move to ${day(c.date)}`);
   if (c.title && it && c.title !== it.title) bits.push(`becomes "${c.title}"`);
   if (c.distance != null && it && c.distance !== it.planned?.distance) bits.push(`${it.planned?.distance ?? '–'} → ${c.distance} ${store.get().settings.units}`);
   if (c.details && it && c.details !== it.details) bits.push('new instructions');
   return `Change ${name}: ${bits.join(', ') || 'details'}`;
+}
+
+/**
+ * Rework the plan from a request in the athlete's own words ("I can't run today, move it to
+ * tomorrow"). Stores the result as a pending proposal and resolves { id } or { none: reason }.
+ */
+export async function proposeChange(request, { signal } = {}) {
+  const sample = await getSample();
+  if (!sample) throw { code: 'capability_disabled' };
+  const { settings, items } = store.get();
+  const t = today();
+  const window = items.filter(i => i.date >= addDays(t, -2) && i.date <= addDays(t, 16))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.category.localeCompare(b.category));
+  const lines = window.map(i => {
+    const bits = [`${i.date} ${fmtDate(i.date, { weekday: 'short' })} [${i.id}] ${i.category}: ${i.title}`];
+    if (i.runType) bits.push(RUN_TYPES[i.runType] || i.runType);
+    if (i.planned?.distance) bits.push(`${i.planned.distance} ${settings.units}`);
+    if (i.done) bits.push('DONE');
+    return bits.join(' · ');
+  });
+
+  const res = await sample.json(`You are a marathon coach adjusting your athlete's training schedule at their request.
+Today is ${t} (${fmtDate(t, { weekday: 'long' })}). Race: ${settings.raceName || 'marathon'} on ${settings.raceDate || 'unknown'}.
+Coach notes: ${(settings.coachNotes || '').slice(0, 1500)}
+
+THE ATHLETE'S REQUEST
+"${request.slice(0, 600)}"
+
+SCHEDULE (ids in brackets; DONE items and anything before ${t} are fixed)
+${lines.join('\n')}
+
+RULES
+- Do what the athlete asked with the fewest changes. Moving an activity = an "update" with a new "date".
+- Keep companions with their run: when a run moves, move that day's "Post-run mobility" and any run-specific fueling item (e.g. "Long-run fueling", "Fuel the workout") with it. If the new day already has the same companion (e.g. its own "Post-run mobility"), delete the moved one instead of doubling up.
+- Never put two hard sessions (tempo, intervals, hills, long run, race, time trial) on consecutive days; shift or soften the following days if needed, and say so.
+- Keep the week's total mileage close to plan unless the athlete says otherwise. If a run is skipped and can't fit, it's fine to drop or shorten an easy run.
+- Prefer strength on the same day as a workout or an easy day, never the day before a long run or key session.
+- Never change DONE items, anything dated before ${t}, or the marathon itself.
+
+Reply with only JSON:
+{"title": "short name of the change", "reason": "1-3 sentences: what moves and why the rest of the week still works",
+ "changes": [ {"op": "update", "id": "<id>", "date"?: "YYYY-MM-DD", "title"?: "...", "details"?: "...", "distance"?: number},
+              {"op": "delete", "id": "<id>"},
+              {"op": "add", "date": "YYYY-MM-DD", "category": "run|strength|mobility|nutrition|cross|recovery|rest|other", "title": "...", "details": "...", "distance"?: number, "runType"?: "easy|long|tempo|intervals|recovery|hills|race"} ]}
+If nothing needs to change, reply {"title": null, "reason": "why", "changes": []}.`, { cache: false, signal });
+
+  const proposal = validateProposal(res);
+  if (!proposal) return { none: String(res?.reason || 'No changes were needed.') };
+  const id = store.addProposal({ ...proposal, source: 'request', request: request.slice(0, 600) });
+  return { id };
 }
 
 /** Apply an accepted proposal to the plan. Changes whose item no longer exists are skipped. */
