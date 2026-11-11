@@ -1,8 +1,8 @@
 // Offline support: network-first so updates show up immediately, cache as fallback.
-const CACHE = 'marathon-planner-v1';
+const CACHE = 'marathon-planner-v2';
 const SHELL = [
   './', 'index.html', 'css/styles.css', 'manifest.webmanifest', 'icons/icon.svg',
-  'js/app.js', 'js/store.js', 'js/plans.js', 'js/charts.js',
+  'js/app.js', 'js/store.js', 'js/plans.js', 'js/charts.js', 'js/coach.js',
 ];
 
 self.addEventListener('install', e => {

@@ -220,10 +220,18 @@ items.sort(key=lambda i: i['date'])
 ORDER = ['run', 'strength', 'mobility', 'nutrition', 'cross', 'recovery', 'rest', 'other']
 items.sort(key=lambda i: (i['date'], ORDER.index(i['category'])))
 
+COACH_NOTES = """Goal: sub-3:10 marathon (7:15/mi average) at the Long Island Marathon, Sun May 2, 2027. Fallback goal 3:15 if the March tune-up half is slower than 1:32.
+Pace zones (per mile): Recovery 9:30-10:15 · Easy 8:30-9:30 (about 80% of miles) · Long run 8:15-9:15 · Marathon pace (MP) 7:10-7:15 · Threshold (T) 6:45-6:55 · Half-marathon pace (HMP) 6:50-6:55 · Interval (I) 6:15-6:25 · Strides/reps 5:45-6:00.
+Starting fitness (Oct 2026): 25-30 mi/week, 10K ~43:00, half ~1:35.
+Benchmarks: December 10K 42:30 or faster · Week 9 (Feb 25) 11 mi with 8 @MP feels controlled, HR steady · Week 12 (Mar 21) tune-up half 1:31 or faster · Week 15 (Apr 11) 14 mi @MP inside 18 averaging 7:10-7:15 without straining.
+Rules: keep easy days genuinely easy; never two hard days back to back; take every cutback week; missed a week to illness: repeat the previous week rather than make it up; skip a workout rather than run it hurt; under 6 h sleep: swap the workout for easy running or rest. Watch for resting HR 5+ bpm above normal, easy runs feeling hard, poor sleep, irritability: two or more means 2-3 easy days.
+Every workout includes 1.5-2 mi warm-up and 1-2 mi cool-down. Long runs capped at about 3 hours."""
+
 plan = {
     'name': 'Sub-3:10 Marathon — Long Island 2027',
     'description': '11-week base (Oct 12) + 18-week build to the Long Island Marathon on Sun May 2, 2027. Runs, strength, mobility, fueling and race-week tasks.',
-    'settings': {'raceName': 'Long Island Marathon', 'raceDate': RACE.isoformat(), 'startDate': BASE_START.isoformat(), 'units': 'mi', 'weekStart': 1},
+    'settings': {'raceName': 'Long Island Marathon', 'raceDate': RACE.isoformat(), 'startDate': BASE_START.isoformat(), 'units': 'mi', 'weekStart': 1,
+                 'coachNotes': COACH_NOTES},
     'items': [{
         'date': i['date'], 'category': i['category'], 'title': i['title'], 'details': i['details'],
         **({'runType': i['run_type']} if i['category'] == 'run' else {}),

@@ -1,10 +1,11 @@
 import {
-  store, itemsByDate, CATEGORIES, RUN_TYPES, uid,
+  store, itemsByDate, CATEGORIES, RUN_TYPES, uid, cloud, connectCloud, pendingWrites,
   today, addDays, startOfWeek, daysBetween, fmtDate, fromISO, toISO, isValidISO,
   parseDuration, fmtDuration, fmtPace, num,
 } from './store.js';
 import { importCSV, samplePlan, CSV_TEMPLATE } from './plans.js';
 import { weeklyVolumeChart, completionBars, bindTooltips } from './charts.js';
+import { getSample, coachRun, coachError, describeChange, applyProposal, pendingProposals } from './coach.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -88,13 +89,25 @@ function renderHeader() {
       <span>${days > 0 ? `${days} day${days === 1 ? '' : 's'} to go` : days === 0 ? 'is TODAY! 🏁' : 'complete 🎉'}</span>
       ${wk && total && wk >= 1 && wk <= total ? `<span class="pill">Week ${wk} of ${total}</span>` : ''}`;
   } else {
-    el.innerHTML = `<a href="#settings">Set your race date →</a>`;
+    el.innerHTML = `<a href="#setup">Set your race date →</a>`;
   }
+  renderSync();
 }
 
-const VIEWS = { today: renderToday, calendar: renderCalendar, plan: renderPlan, progress: renderProgress, settings: renderSettings };
+function renderSync() {
+  const el = $('#sync');
+  if (!el) return;
+  const st = cloud.status;
+  el.hidden = cloud.mode !== 'cloud';
+  el.className = `sync sync-${st}`;
+  el.textContent = st === 'connecting' ? 'Loading…' : st === 'ready' ? (pendingWrites() ? 'Saving…' : 'Synced') : st === 'offline' ? 'Offline' : st === 'error' ? 'Not saved' : '';
+  el.title = cloud.message || (st === 'ready' ? 'Saved to your claude.ai account' : '');
+}
+
+const VIEWS = { today: renderToday, calendar: renderCalendar, plan: renderPlan, progress: renderProgress, setup: renderSettings };
 
 function route() {
+  if (location.hash === '#settings') return location.replace('#setup');
   const name = (location.hash.slice(1) || 'today').split('/')[0];
   const view = VIEWS[name] ? name : 'today';
   $$('.nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === `#${view}`));
@@ -103,8 +116,79 @@ function route() {
   const old = $('#view');
   const main = old.cloneNode(false);
   old.replaceWith(main);
+  if (cloud.status === 'error' || cloud.status === 'offline') {
+    main.insertAdjacentHTML('afterbegin', `<p class="banner warn" role="status">${esc(cloud.message)}</p>`);
+  }
   VIEWS[view](main);
   bindTooltips(main);
+}
+
+// ---------- in-page prompts (claude.ai pages can't show confirm/alert) ----------
+
+/** Ask a question in a modal. buttons: [{label, value, kind}]. Resolves the chosen value, or null. */
+function ask(title, body = '', buttons = [{ label: 'Cancel', value: null }, { label: 'OK', value: true, kind: 'primary' }]) {
+  const dlg = $('#confirm');
+  dlg.innerHTML = `<div class="dlg">
+    <h2 class="ask-title">${esc(title)}</h2>
+    ${body ? `<p class="ask-body">${esc(body)}</p>` : ''}
+    <footer class="dlg-foot">${buttons.map((b, i) => `<button class="btn ${b.kind || ''}" data-i="${i}">${esc(b.label)}</button>`).join('')}</footer>
+  </div>`;
+  return new Promise(resolve => {
+    let result = null;
+    $$('[data-i]', dlg).forEach(b => (b.onclick = () => { result = buttons[+b.dataset.i].value; dlg.close(); }));
+    dlg.addEventListener('close', () => resolve(result), { once: true });
+    dlg.showModal();
+    $('.btn.primary, .btn.danger', dlg)?.focus();
+  });
+}
+const confirmAction = (title, body, okLabel = 'OK', kind = 'primary') =>
+  ask(title, body, [{ label: 'Cancel', value: null }, { label: okLabel, value: true, kind }]);
+
+function toast(msg) {
+  let el = $('#toast');
+  if (!el) { el = Object.assign(document.createElement('div'), { id: 'toast', role: 'status' }); document.body.appendChild(el); }
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toast.t);
+  toast.t = setTimeout(() => el.classList.remove('show'), 3500);
+}
+
+// ---------- coaching & proposals ----------
+
+function coachHTML(note) {
+  if (!note) return '';
+  const list = (label, arr) => arr?.length ? `<p class="coach-label">${label}</p><ul>${arr.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '';
+  return `<div class="coach rating-${esc(note.rating)}">
+    <p class="coach-head"><span class="coach-tag">Coach</span> ${esc(note.headline)}</p>
+    <p>${esc(note.summary)}</p>
+    ${list('Went well', note.wentWell)}${list('Watch', note.watch)}
+    ${note.nextTime ? `<p class="coach-label">Next time</p><p>${esc(note.nextTime)}</p>` : ''}
+  </div>`;
+}
+
+function proposalsHTML() {
+  const list = pendingProposals();
+  if (!list.length) return '';
+  return list.map(([id, p]) => `<section class="card proposal" data-proposal="${esc(id)}">
+    <div class="card-head"><h3><span class="coach-tag">Suggested change</span> ${esc(p.title)}</h3></div>
+    ${p.reason ? `<p>${esc(p.reason)}</p>` : ''}
+    <ul class="changes">${(p.changes || []).map(c => `<li>${esc(describeChange(c))}</li>`).join('')}</ul>
+    <div class="btn-row"><button class="btn" data-dismiss>Dismiss</button><button class="btn primary" data-accept>Accept change</button></div>
+  </section>`).join('');
+}
+
+function bindProposals(root) {
+  root.addEventListener('click', e => {
+    const card = e.target.closest('[data-proposal]');
+    if (!card) return;
+    const id = card.dataset.proposal;
+    if (e.target.closest('[data-accept]')) {
+      const n = applyProposal(id);
+      toast(n ? `Plan updated (${n} change${n === 1 ? '' : 's'}).` : 'Nothing to change: those activities have moved or passed.');
+    } else if (e.target.closest('[data-dismiss]')) {
+      store.updateProposal(id, { status: 'dismissed', decidedAt: new Date().toISOString() });
+    }
+  });
 }
 
 // ---------- shared day list ----------
@@ -119,6 +203,7 @@ function dayListHTML(date) {
         <span class="item-title">${CATEGORIES[it.category]?.icon || ''} ${esc(it.title)}</span>
         <span class="item-meta">${esc(itemMeta(it))}</span>
         ${it.details ? `<span class="item-details">${esc(it.details)}</span>` : ''}
+        ${store.get().coaching[it.id] ? `<span class="item-coach">Coach: ${esc(store.get().coaching[it.id].headline)}</span>` : ''}
       </button>
     </li>`).join('')}</ul>`;
 }
@@ -170,6 +255,8 @@ function renderToday(main) {
       </button>`;
     }).join('')}</div>
 
+    ${proposalsHTML()}
+
     <section class="card">
       <div class="card-head">
         <h3>Plan ${items.length ? `<span class="muted">${done}/${items.length} done</span>` : ''}</h3>
@@ -202,6 +289,7 @@ function renderToday(main) {
   });
   $('#add-here').onclick = () => openItemDialog(null, d);
   bindDayList($('#day-list'));
+  bindProposals(main);
 
   const form = $('#checkin');
   form.addEventListener('change', () => {
@@ -362,6 +450,8 @@ function openLogDialog(it) {
       <label class="span-all">Notes<textarea name="notes" rows="3" placeholder="Splits, how it felt, what you ate…">${esc(a.notes)}</textarea></label>
       <p class="span-all muted" id="pace-out"></p>
     </form>
+    ${isRun ? `<div id="coach-box">${coachHTML(store.get().coaching[it.id])}</div>
+      <div class="btn-row" id="coach-row" hidden><button class="btn small" data-coach>${store.get().coaching[it.id] ? 'Coach this run again' : 'Get coaching'}</button><span class="muted small" id="coach-status"></span></div>` : ''}
     <footer class="dlg-foot">
       <button class="btn" data-edit>Edit plan</button>
       <button class="btn primary" data-save>Save</button>
@@ -375,18 +465,51 @@ function openLogDialog(it) {
     };
     form.addEventListener('input', updatePace); updatePace();
     $('[data-edit]', dlg).onclick = () => openEditDialog(it);
-    $('[data-save]', dlg).onclick = () => {
+    const coachBtn = $('[data-coach]', dlg);
+    if (coachBtn) getSample().then(sample => {
+      if (!sample || !dlg.contains(coachBtn)) return;
+      $('#coach-row', dlg).hidden = false;
+      coachBtn.onclick = () => runCoaching(it.id, dlg);
+    });
+    $('[data-save]', dlg).onclick = async () => {
       const f = new FormData(form);
       const actual = {
+        ...(it.actual || {}),
         distance: num(f.get('distance')), duration: parseDuration(f.get('duration')),
         rpe: num(f.get('rpe')), hr: num(f.get('hr')), notes: (f.get('notes') || '').trim(),
       };
-      const hasData = Object.values(actual).some(v => v);
+      const hasData = ['distance', 'duration', 'rpe', 'hr', 'notes'].some(k => actual[k]);
       const done = f.get('done') === 'on' || (hasData && !it.done);
       store.updateItem(it.id, { actual, done, completedAt: done ? (it.completedAt || new Date().toISOString()) : undefined });
+      // Coach every completed run with logged data, once, when Claude is available here.
+      if (isRun && done && hasData && !store.get().coaching[it.id] && await getSample()) {
+        return runCoaching(it.id, dlg);
+      }
       afterDialogChange();
     };
   });
+}
+
+async function runCoaching(itemId, dlg) {
+  const run = store.get().items.find(i => i.id === itemId);
+  const status = $('#coach-status', dlg), btn = $('[data-coach]', dlg), box = $('#coach-box', dlg);
+  if (!run || !box) return;
+  $('#coach-row', dlg).hidden = false;
+  if (btn) btn.disabled = true;
+  box.innerHTML = `<p class="coach thinking">Your coach is reviewing this run…</p>`;
+  try {
+    const note = await coachRun(run);
+    if (!dlg.contains(box)) return toast(`Coaching ready: ${note.headline}`);
+    box.innerHTML = coachHTML(note);
+    if (note.proposalId) box.insertAdjacentHTML('beforeend', `<p class="small">Your coach also suggested a plan change. Review it on the Today screen.</p>`);
+    if (status) status.textContent = '';
+  } catch (e) {
+    if (!dlg.contains(box)) return;
+    box.innerHTML = coachHTML(store.get().coaching[itemId]);
+    if (status) status.textContent = coachError(e);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Coach this run again'; }
+  }
 }
 
 function openEditDialog(it, date) {
@@ -443,7 +566,7 @@ function openEditDialog(it, date) {
       if (isNew) {
         if (f.get('repeat') === 'on') {
           const dows = f.getAll('dow').map(Number), until = f.get('until');
-          if (!dows.length || !isValidISO(until) || until < d0) return alert('Pick at least one weekday and an end date after the start date.');
+          if (!dows.length || !isValidISO(until) || until < d0) return ask('Check the repeat settings', 'Pick at least one weekday and an end date after the start date.', [{ label: 'OK', value: true, kind: 'primary' }]);
           const seriesId = uid(), items = [];
           for (let d = d0; d <= until; d = addDays(d, 1)) {
             if (dows.includes(fromISO(d).getDay())) items.push({ ...fields, date: d, seriesId });
@@ -461,12 +584,15 @@ function openEditDialog(it, date) {
       afterDialogChange();
     };
     const del = $('[data-delete]', dlg);
-    if (del) del.onclick = () => {
-      if (it.seriesId && confirm('Also delete all future repeats of this activity?\n\nOK = this and all future · Cancel = choose again')) {
-        store.deleteSeries(it.seriesId, it.date);
-      } else if (confirm(`Delete "${it.title}" on ${fmtDate(it.date)}?`)) {
-        store.deleteItem(it.id);
-      } else return;
+    if (del) del.onclick = async () => {
+      const choice = await ask(`Delete "${it.title}" on ${fmtDate(it.date)}?`, '', [
+        { label: 'Cancel', value: null },
+        ...(it.seriesId ? [{ label: 'This and all future repeats', value: 'series', kind: 'danger' }] : []),
+        { label: it.seriesId ? 'Just this one' : 'Delete', value: 'one', kind: 'danger' },
+      ]);
+      if (choice === 'series') store.deleteSeries(it.seriesId, it.date);
+      else if (choice === 'one') store.deleteItem(it.id);
+      else return;
       afterDialogChange();
     };
   });
@@ -498,6 +624,8 @@ function renderPlan(main) {
       <button class="btn primary" id="add">+ Add activity</button>
     </div>
 
+    ${proposalsHTML()}
+
     <section class="card">
       <h3>Build your plan</h3>
       <p class="muted">Add activities one at a time (with weekly repeats), import your whole plan from a spreadsheet, or start from a sample 16-week plan and edit it.</p>
@@ -509,7 +637,7 @@ function renderPlan(main) {
       <div id="bundled"></div>
       <div id="import" ${ui.importOpen ? '' : 'hidden'}>
         <p class="small">Paste rows from Excel/Google Sheets or upload a .csv. Columns: <code>date</code> <em>or</em> <code>week</code> + <code>day</code>, then <code>category</code>, <code>title</code>, <code>details</code>, <code>distance</code>, <code>duration</code>, <code>run_type</code>.
-        Categories: ${Object.keys(CATEGORIES).map(k => `<code>${k}</code>`).join(' ')}. Week/day rows use your plan start date${S().startDate ? ` (${esc(fmtDate(S().startDate))})` : ' — <a href="#settings">set it in Settings</a>'}.</p>
+        Categories: ${Object.keys(CATEGORIES).map(k => `<code>${k}</code>`).join(' ')}. Week/day rows use your plan start date${S().startDate ? ` (${esc(fmtDate(S().startDate))})` : ' — <a href="#setup">set it in Setup</a>'}.</p>
         <textarea id="csv" rows="8" spellcheck="false" placeholder="${esc(CSV_TEMPLATE.split('\n').slice(0, 3).join('\n'))}"></textarea>
         <div class="btn-row">
           <label class="btn file">Choose file…<input type="file" id="csv-file" accept=".csv,.tsv,.txt" hidden></label>
@@ -554,9 +682,10 @@ function renderPlan(main) {
     if (rows.length) { ui.flash = msg; ui.importOpen = errors.length > 0; store.addItems(rows); }
     else $('#import-msg').innerHTML = msg;
   };
-  $('#sample').onclick = () => {
-    const extra = items.length ? '\n\nThis is added on top of your existing activities.' : '';
-    if (!confirm(`Load a 16-week plan ending on ${S().raceDate ? fmtDate(S().raceDate) : 'a race date 16 weeks out'}?${extra}`)) return;
+  bindProposals(main);
+  $('#sample').onclick = async () => {
+    const extra = items.length ? 'It is added on top of your existing activities.' : '';
+    if (!await confirmAction(`Load a 16-week plan ending on ${S().raceDate ? fmtDate(S().raceDate) : 'a race date 16 weeks out'}?`, extra, 'Load plan')) return;
     const { items: plan, start, raceDate } = samplePlan(S());
     store.updateSettings({ startDate: S().startDate || start, raceDate: S().raceDate || raceDate, raceName: S().raceName || 'My Marathon' });
     store.addItems(plan);
@@ -564,8 +693,8 @@ function renderPlan(main) {
   };
   loadBundledPlans($('#bundled'), items.length);
   const clear = $('#clear');
-  if (clear) clear.onclick = () => {
-    if (confirm('Delete every activity in your plan? (Check-ins and settings are kept. Consider exporting a backup first.)')) { store.clearItems(); route(); }
+  if (clear) clear.onclick = async () => {
+    if (await confirmAction('Delete every activity in your plan?', 'Check-ins and settings are kept. Consider exporting a backup first.', 'Delete plan', 'danger')) { store.clearItems(); route(); }
   };
   main.addEventListener('click', e => {
     const b = e.target.closest('[data-action="edit"]');
@@ -592,16 +721,17 @@ async function loadBundledPlans(el, existing) {
     b.disabled = true;
     try {
       const plan = await (await fetch(`plans/${meta.file}`)).json();
-      const msg = `Load "${plan.name}" (${plan.items.length} activities)?` +
-        (existing ? `\n\nThis REPLACES your current plan of ${existing} activities. Check-ins are kept.` : '') +
-        (plan.settings?.raceDate ? `\n\nRace date will be set to ${fmtDate(plan.settings.raceDate)}.` : '');
-      if (!confirm(msg)) return;
+      const body = [
+        existing ? `This replaces your current plan of ${existing} activities. Check-ins are kept.` : '',
+        plan.settings?.raceDate ? `Race date will be set to ${fmtDate(plan.settings.raceDate)}.` : '',
+      ].filter(Boolean).join(' ');
+      if (!await confirmAction(`Load "${plan.name}" (${plan.items.length} activities)?`, body, existing ? 'Replace plan' : 'Load plan')) return;
       if (existing) store.clearItems();
       if (plan.settings) store.updateSettings(plan.settings);
       store.addItems(plan.items);
       route();
     } catch (err) {
-      alert(`Could not load the plan: ${err.message}`);
+      toast(`Could not load the plan: ${err.message}`);
     } finally { b.disabled = false; }
   });
 }
@@ -695,12 +825,13 @@ function renderProgress(main) {
   });
 }
 
-// ---------- Settings ----------
+// ---------- Setup ----------
 
 function renderSettings(main) {
   const s = S();
+  const inCloud = cloud.mode === 'cloud';
   main.innerHTML = `
-    <h2>Settings</h2>
+    <h2>Setup</h2>
     <section class="card">
       <h3>Race</h3>
       <form id="settings" class="grid-form">
@@ -709,12 +840,15 @@ function renderSettings(main) {
         <label>Plan start date<input type="date" name="startDate" value="${esc(s.startDate)}"></label>
         <label>Units<select name="units"><option value="mi" ${s.units === 'mi' ? 'selected' : ''}>Miles</option><option value="km" ${s.units === 'km' ? 'selected' : ''}>Kilometers</option></select></label>
         <label>Week starts on<select name="weekStart"><option value="1" ${s.weekStart === 1 ? 'selected' : ''}>Monday</option><option value="0" ${s.weekStart === 0 ? 'selected' : ''}>Sunday</option></select></label>
+        <label class="span-all">Notes for your coach<textarea name="coachNotes" rows="7" placeholder="Goal time, pace zones, heart-rate zones, injuries, schedule constraints. Claude reads this every time it coaches a run.">${esc(s.coachNotes)}</textarea></label>
       </form>
       <p class="muted small" id="saved"></p>
     </section>
     <section class="card">
       <h3>Your data</h3>
-      <p class="muted">Everything is stored privately in this browser on this device. Export a backup regularly, and use it to move your plan to another phone or computer.</p>
+      <p class="muted">${inCloud
+        ? 'Your plan, logs and coaching are saved privately to your claude.ai account and show up on every device where you open this page. Claude can read them to coach you.'
+        : 'Everything is stored privately in this browser on this device. Export a backup regularly, and use it to move your plan to another phone or computer.'}</p>
       <div class="btn-row">
         <button class="btn" id="export">⬇️ Export backup (JSON)</button>
         <label class="btn file">⬆️ Restore backup<input type="file" id="restore" accept=".json,application/json" hidden></label>
@@ -726,6 +860,7 @@ function renderSettings(main) {
   const form = $('#settings');
   form.addEventListener('change', () => {
     const f = Object.fromEntries(new FormData(form));
+    f.coachNotes = (f.coachNotes || '').trim();
     store.updateSettings({ ...f, weekStart: +f.weekStart });
     $('#saved').textContent = 'Saved ✓';
     renderHeader();
@@ -743,17 +878,28 @@ function renderSettings(main) {
     try {
       const data = JSON.parse(await file.text());
       if (!data || !Array.isArray(data.items)) throw new Error('Not a backup file');
-      if (confirm(`Replace all current data with this backup (${data.items.length} activities)?`)) { store.replaceAll(data); route(); }
-    } catch (err) { alert(`Could not restore: ${err.message}`); }
+      if (await confirmAction(`Replace all current data with this backup (${data.items.length} activities)?`, inCloud ? 'This replaces the plan saved to your claude.ai account.' : '', 'Replace')) {
+        store.replaceAll(data); route(); toast('Backup restored.');
+      }
+    } catch (err) { toast(`Could not restore: ${err.message}`); }
+    e.target.value = '';
   };
-  $('#reset').onclick = () => {
-    if (confirm('Erase your entire plan, logs and settings? This cannot be undone.')) { store.reset(); route(); }
+  $('#reset').onclick = async () => {
+    if (await confirmAction('Erase your entire plan, logs and settings?', 'This cannot be undone.', 'Erase everything', 'danger')) { store.reset(); route(); }
   };
 }
 
 // ---------- utils & boot ----------
 
-function download(name, text, type) {
+async function download(name, text, type) {
+  // claude.ai pages save files through the downloads capability; plain links are blocked there.
+  if (window.claude?.use) {
+    const dl = await window.claude.use('downloads').catch(() => null);
+    if (dl) {
+      try { await dl.save({ filename: name, data: text }); } catch (e) { if (e?.code !== 'declined') toast("Couldn't save the file here."); }
+      return;
+    }
+  }
   const url = URL.createObjectURL(new Blob([text], { type }));
   const a = Object.assign(document.createElement('a'), { href: url, download: name });
   document.body.appendChild(a); a.click(); a.remove();
@@ -763,8 +909,12 @@ function download(name, text, type) {
 // Re-render when data changes, but don't blow away a form the user is typing in.
 store.subscribe(() => {
   const view = location.hash.slice(1) || 'today';
-  if (view === 'settings') return;
   const active = document.activeElement;
+  renderSync();
+  if (view === 'setup') {
+    if (!active?.closest('#settings, textarea, input')) route();
+    return;
+  }
   if (active?.closest('#checkin')) { $('#ci-saved') && ($('#ci-saved').textContent = 'Saved ✓'); return; }
   route();
   if ($('#dlg-day')) dayDialogRefresh?.();
@@ -773,7 +923,9 @@ store.subscribe(() => {
 dialog().addEventListener('close', () => { dayDialogRefresh = null; });
 window.addEventListener('hashchange', route);
 route();
+connectCloud();
 
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+// Offline support only for the GitHub Pages copy; claude.ai pages don't allow service workers.
+if (!window.claude && 'serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }

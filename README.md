@@ -14,8 +14,13 @@ There's no account and no server. Your data stays in your browser on your device
   - load a **sample 16-week plan** (long-run build, cutback weeks, 3-week taper, strength, mobility, fueling, race-week carb load) and edit it
 - **Log results**: actual distance, time (pace is calculated for you), effort (RPE), heart rate and notes for any activity.
 - **Progress**: completion %, weekly and total distance, longest run, streak, average sleep, a planned-vs-completed weekly mileage chart, completion by category, and a recent runs table.
-- **Settings**: race name and date (shown as a countdown with "Week N of M"), plan start date, miles/km, Monday or Sunday week start, JSON backup/restore and CSV export.
+- **Setup**: race name and date (shown as a countdown with "Week N of M"), plan start date, miles/km, Monday or Sunday week start, JSON backup/restore and CSV export.
 - Works offline and can be installed to your home screen (PWA).
+
+## Two ways to run it
+
+- **claude.ai (main version):** a private claude.ai page built from `claude.html`. Your plan, logs and coaching are saved to your claude.ai account, so they show up on every device, and Claude coaches each logged run and can suggest plan changes for you to accept or dismiss. Data lives in these documents: `plan/settings`, `weeks/<monday>`, `checkins/<YYYY-MM>`, `coaching/<itemId>` and `proposals/<id>`.
+- **GitHub Pages / local:** `index.html`. The same app with data kept in that browser only, and no coaching.
 
 ## Ready-made plans
 
@@ -69,7 +74,9 @@ css/styles.css        styles (light + dark mode)
 js/store.js           data model, localStorage persistence, date/pace helpers
 js/plans.js           CSV import and the sample 16-week plan
 js/charts.js          SVG charts + tooltips
-js/app.js             views: Today, Calendar, Plan, Progress, Settings
+js/app.js             views: Today, Calendar, Plan, Progress, Setup
+js/coach.js           run coaching and plan-change proposals (claude.ai version)
+claude.html           page shell for the claude.ai version
 plans/                ready-made plans (+ the script that generates the Sub-3:10 plan)
 sw.js                 offline cache
 manifest.webmanifest  install-to-home-screen metadata
