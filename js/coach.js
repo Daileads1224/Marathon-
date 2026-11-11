@@ -119,10 +119,11 @@ export function validateProposal(p) {
   if (!p || typeof p !== 'object' || !Array.isArray(p.changes)) return null;
   const items = store.get().items, t = today();
   const changes = p.changes.filter(c => {
-    if (c?.op === 'add') return typeof c.date === 'string' && c.date > t && CATEGORIES[c.category] && c.title;
+    if (c?.op === 'add') return typeof c.date === 'string' && c.date >= t && CATEGORIES[c.category] && c.title;
     const it = items.find(i => i.id === c?.id);
-    if (!it || it.date <= t || it.runType === 'race') return false;
-    return c.op === 'delete' || (c.op === 'update' && (!c.date || c.date > t));
+    // Today's activities can change until they're done; past ones and the race never do.
+    if (!it || it.date < t || (it.date === t && it.done) || (it.runType === 'race' && /marathon/i.test(it.title))) return false;
+    return c.op === 'delete' || (c.op === 'update' && (!c.date || c.date >= t));
   });
   return changes.length ? { title: String(p.title || 'Plan change'), reason: String(p.reason || ''), changes } : null;
 }
