@@ -5,11 +5,14 @@ them to the watch. Each event's external_id is the app's activity id, so re-runn
 workouts in place, and runs removed from the plan are deleted from the calendar.
 
 Usage:
-  python3 plans/intervals_sync.py WEEKS_DIR [--from YYYY-MM-DD] [--days 21] [--post]
+  python3 plans/intervals_sync.py WEEKS_DIR [--from YYYY-MM-DD] [--days 21] [--post] [--recreate]
 
 WEEKS_DIR holds the app's weeks/<monday>.json documents (an ArtifactData list with out_dir).
 Without --post it prints the events it would send. Authentication is added by the session's
 network proxy, so no key is read here.
+
+Garmin only receives pace targets when the Intervals.icu Run sport settings have a threshold
+pace. Workouts sent before it was set need --recreate to be exported to Garmin again.
 """
 import argparse, json, os, re, subprocess, sys
 from datetime import date, timedelta
@@ -167,6 +170,8 @@ def main():
     ap.add_argument('--days', type=int, default=21)
     ap.add_argument('--unit', default='mi', choices=['mi', 'km'])
     ap.add_argument('--post', action='store_true')
+    ap.add_argument('--recreate', action='store_true',
+                    help='delete and re-create this window\'s workouts so Intervals.icu sends them to Garmin again')
     a = ap.parse_args()
     end = (date.fromisoformat(a.start) + timedelta(days=a.days - 1)).isoformat()
 
@@ -179,11 +184,15 @@ def main():
             'category': 'WORKOUT', 'type': 'Run', 'external_id': r['id'],
             'start_date_local': f"{r['date']}T00:00:00", 'name': r['title'],
             'description': text, 'distance': round(miles * 1609.344) if miles else None, 'tags': [TAG],
+            'target': 'PACE',  # export pace targets to the watch rather than leaving it to "auto"
         })
     if not a.post:
         print(json.dumps(events, ensure_ascii=False, indent=1))
         return
 
+    if a.recreate:
+        code, text = curl('PUT', f'{API}/events/bulk-delete', [{'external_id': e['external_id']} for e in events])
+        print('deleted for re-create', code, text[:120])
     code, text = curl('POST', f'{API}/events/bulk?upsert=true', events)
     print('upsert', code, text[:300] if code >= 300 else f'{len(events)} workouts')
     if code >= 300:
