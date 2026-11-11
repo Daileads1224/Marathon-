@@ -9,6 +9,7 @@
 //       plan/strava              Strava sync status (last sync, heart-rate zones)
 //       weeks/<monday>           { items: [...] } every activity in that Mon–Sun week
 //       checkins/<YYYY-MM>       { days: { '2026-11-11': {...} } }
+//       meals/<YYYY-MM>          { days: { '2026-11-11': { breakfast: [entry], lunch: [...], ... } } }
 //       coaching/<itemId>        a coaching note for one activity
 //       proposals/<id>           a suggested plan change (pending/accepted/dismissed)
 
@@ -32,9 +33,10 @@ export const RUN_TYPES = {
 
 const DEFAULT_STATE = {
   version: 1,
-  settings: { raceName: '', raceDate: '', startDate: '', units: 'mi', weekStart: 1, coachNotes: '' },
+  settings: { raceName: '', raceDate: '', startDate: '', units: 'mi', weekStart: 1, coachNotes: '', bodyWeight: null, weightUnit: 'lb' },
   items: [],
   logs: {},
+  meals: {},
   coaching: {},
   proposals: {},
   strava: {},
@@ -67,6 +69,7 @@ function normalize(s) {
     settings: { ...DEFAULT_STATE.settings, ...obj(s.settings) },
     items: Array.isArray(s.items) ? s.items : [],
     logs: obj(s.logs),
+    meals: obj(s.meals),
     coaching: obj(s.coaching),
     proposals: obj(s.proposals),
     strava: obj(s.strava),
@@ -97,6 +100,7 @@ export function weekKey(iso) {
 }
 const weekPath = iso => `weeks/${weekKey(iso)}`;
 const monthPath = iso => `checkins/${iso.slice(0, 7)}`;
+const mealsPath = iso => `meals/${iso.slice(0, 7)}`;
 
 /** The body a document should have right now, or null to delete it. */
 function bodyFor(path) {
@@ -111,6 +115,10 @@ function bodyFor(path) {
     const days = Object.fromEntries(Object.entries(state.logs).filter(([d]) => d.startsWith(id)));
     return Object.keys(days).length ? { days } : null;
   }
+  if (col === 'meals') {
+    const days = Object.fromEntries(Object.entries(state.meals).filter(([d]) => d.startsWith(id)));
+    return Object.keys(days).length ? { days } : null;
+  }
   if (col === 'coaching') return state.coaching[id] ?? null;
   if (col === 'proposals') return state.proposals[id] ?? null;
   return null;
@@ -122,6 +130,7 @@ function allPaths(s = state) {
     ...(Object.keys(s.strava).length ? ['plan/strava'] : []),
     ...s.items.map(i => weekPath(i.date)),
     ...Object.keys(s.logs).map(monthPath),
+    ...Object.keys(s.meals).map(mealsPath),
     ...Object.keys(s.coaching).map(id => `coaching/${id}`),
     ...Object.keys(s.proposals).map(id => `proposals/${id}`),
   ];
@@ -187,7 +196,7 @@ export async function connectCloud() {
   db = handle;
 
   const seen = new Set();
-  const expect = ['plan', 'strava', 'weeks', 'checkins', 'coaching', 'proposals'];
+  const expect = ['plan', 'strava', 'weeks', 'checkins', 'meals', 'coaching', 'proposals'];
   const timer = setTimeout(() => {
     if (cloud.status === 'connecting') setStatus('offline', "Can't reach your saved data yet. Showing what's on this device.");
   }, 10000);
@@ -241,6 +250,15 @@ export async function connectCloud() {
       Object.assign(logs, body?.days || {});
     }
     state.logs = logs;
+  });
+  watch('meals', docs => {
+    const meals = {};
+    for (const [d, v] of Object.entries(state.meals)) if (busy(mealsPath(d))) meals[d] = v;
+    for (const [m, body] of Object.entries(docs)) {
+      if (busy(`meals/${m}`)) continue;
+      Object.assign(meals, body?.days || {});
+    }
+    state.meals = meals;
   });
   const mapWatch = col => watch(col, docs => {
     const next = {};
@@ -300,6 +318,20 @@ export const store = {
     const clean = Object.fromEntries(Object.entries(log).filter(([, v]) => v !== '' && v != null));
     if (Object.keys(clean).length) state.logs[date] = clean; else delete state.logs[date];
     commit([monthPath(date)]);
+  },
+
+  addMeal(date, slot, entry) {
+    const day = { ...(state.meals[date] || {}) };
+    day[slot] = [...(day[slot] || []), { id: uid(), ...entry }];
+    state.meals[date] = day;
+    commit([mealsPath(date)]);
+  },
+  removeMeal(date, slot, id) {
+    const day = { ...(state.meals[date] || {}) };
+    day[slot] = (day[slot] || []).filter(e => e.id !== id);
+    if (!day[slot].length) delete day[slot];
+    if (Object.keys(day).length) state.meals[date] = day; else delete state.meals[date];
+    commit([mealsPath(date)]);
   },
 
   setCoaching(itemId, note) {

@@ -7,8 +7,11 @@ There's no account and no server. Your data stays in your browser on your device
 ## Features
 
 - **Today**: the day's checklist with one-tap check-off, a week strip with completion dots, and a daily check-in (sleep, weight, energy, soreness, water, notes).
-- **Calendar**: a color-coded **month** view with weekly mileage (done/planned), and a **week** view with full workout details. You can filter by category, and tapping a day opens it.
-- **Plan**: build your whole plan three ways:
+- **Plan**: a **Season** view (one row per week, grouped by training phase, with each day's run and weekly mileage), plus **Month** and **Week** calendar views. Tapping a day opens it.
+- **Running**: this week's runs with results and coaching, upcoming key sessions, your pace and heart-rate zones, and recent runs.
+- **Strength** and **Stretching**: the next session as an exercise table (sets × reps or hold times, and what each exercise is for), what's coming up, and the stretching routines.
+- **Nutrition**: log meals for each day and see carbs and protein against your plan's targets (by body weight and the day's training). In the claude.ai version, Claude can estimate the macros from a description.
+- **Setup → Build your plan**: build your whole plan three ways:
   - add activities one at a time, with **weekly repeats** (e.g. strength every Tue/Thu until race day)
   - **import a spreadsheet** (CSV, or paste straight from Excel/Google Sheets), by date or by week number + weekday
   - load a **sample 16-week plan** (long-run build, cutback weeks, 3-week taper, strength, mobility, fueling, race-week carb load) and edit it
@@ -24,7 +27,7 @@ There's no account and no server. Your data stays in your browser on your device
 
 ## Ready-made plans
 
-**Plan → Ready-made plans** lists the plans in [`plans/`](plans/). Tap **Load** and the plan, race name and race date are set up in one step.
+**Setup → Build your plan** lists the plans in [`plans/`](plans/). Tap **Load** and the plan, race name and race date are set up in one step.
 
 - **Sub-3:10 Marathon, Long Island 2027** (`plans/sub-3-10-long-island-2027.*`): an 11-week base block from Oct 12, 2026, then an 18-week build to Sun May 2, 2027. Every day includes the run (with paces), strength sessions, post-run mobility, fueling targets, benchmarks and race-week tasks. Weekly mileage matches the plan (45 → 65 peak → 24 + race). Workout notes say which build week they belong to ("Build week 3 of 18"). The app counts weeks from the Oct 12 base start, so build week 1 shows as W12.
   The same plan is also in `.csv` for spreadsheets. To change it, edit `plans/build_sub310.py` and run `python3 plans/build_sub310.py`.
@@ -75,6 +78,9 @@ js/store.js           data model, localStorage persistence, date/pace helpers
 js/plans.js           CSV import and the sample 16-week plan
 js/charts.js          SVG charts + tooltips
 js/app.js             views: Today, Calendar, Plan, Progress, Setup
+js/tabs.js            Running, Strength and Stretching tabs
+js/routines.js        stretching routines and exercise parsing
+js/nutrition.js       Nutrition tab: meal log and macro targets
 js/strava.js          Strava sync (claude.ai version)
 js/coach.js           run coaching and plan-change proposals (claude.ai version)
 claude.html           page shell for the claude.ai version

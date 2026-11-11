@@ -25,12 +25,28 @@ def add(d, category, title, details='', distance=None, run_type=None):
 def easy(d, miles, extra='', title='Easy run'):
     add(d, 'run', title, f"Easy pace {PACE['easy']}, conversational.\n{extra}", miles, 'easy')
 
+# Kept in step with ROUTINES in js/routines.js ("Name — dose — cue" per line).
+POST_RUN = '''10 min.
+Calf stretch, straight knee — 45 s/side — Heel down, lean into a wall
+Calf stretch, bent knee — 45 s/side — Targets the soleus and Achilles
+Kneeling hip flexor stretch — 45 s/side — Squeeze the glute, tuck the pelvis
+Hamstring stretch, heel on a step — 45 s/side — Hinge from the hips, back flat
+Figure-4 glute stretch — 45 s/side — Lying on your back, pull the knee in
+Thoracic open books — 8/side — Follow the top hand with your eyes'''
+FOAM_ROLL = '''12 min.
+Foam roll calves — 60 s/side — Pause on tender spots, breathe
+Foam roll quads — 60 s/side — Hip to just above the knee
+Foam roll outer quad and glutes — 60 s/side — Stay off the knee joint
+Foam roll upper back — 60 s — Hands behind the head, small rolls
+90/90 hip switches — 10 slow reps — Sit tall, knees fall side to side
+Leg swings, front-back and side-side — 10 each/side — Hold a wall, relaxed swings'''
+
 def mobility(d):
-    add(d, 'mobility', 'Post-run mobility', '10 min: hips, calves, thoracic spine.')
+    add(d, 'mobility', 'Post-run mobility', POST_RUN)
 
 def monday(d, note=''):
     add(d, 'rest', 'Rest day', f'Full rest, or 30–45 min easy cross-training (bike, elliptical or swim).\n{note}')
-    add(d, 'recovery', 'Foam roll + light mobility', '10–15 min. Quads, calves, glutes, hips.')
+    add(d, 'recovery', 'Foam roll + light mobility', FOAM_ROLL)
 
 STRENGTH_EX = """Bulgarian split squat — {s} × 6–8/leg, heavy
 Romanian deadlift — {s} × 6–8
@@ -228,11 +244,22 @@ Rules: keep easy days genuinely easy; never two hard days back to back; take eve
 Heart-rate zones (Strava, from max HR): Z1 up to 127, Z2 128-159, Z3 160-174, Z4 175-190, Z5 191+. Easy runs have mostly sat at 136-153 bpm.
 Every workout includes 1.5-2 mi warm-up and 1-2 mi cool-down. Long runs capped at about 3 hours."""
 
+PACE_ZONES = [
+    {'zone': 'Recovery', 'pace': '9:30–10:15', 'use': 'Day after hard sessions'},
+    {'zone': 'Easy', 'pace': '8:30–9:30', 'use': 'Most of your miles (about 80%)'},
+    {'zone': 'Long run', 'pace': '8:15–9:15', 'use': 'Sunday long runs'},
+    {'zone': 'Marathon (MP)', 'pace': '7:10–7:15', 'use': 'MP segments, race'},
+    {'zone': 'Threshold (T)', 'pace': '6:45–6:55', 'use': 'Tempos, cruise intervals'},
+    {'zone': 'Half marathon (HMP)', 'pace': '6:50–6:55', 'use': 'Late-build workouts'},
+    {'zone': 'Interval (I)', 'pace': '6:15–6:25', 'use': 'VO2 max repeats'},
+    {'zone': 'Strides / reps', 'pace': '5:45–6:00', 'use': 'Strides, 400s'},
+]
+
 plan = {
     'name': 'Sub-3:10 Marathon — Long Island 2027',
     'description': '11-week base (Oct 12) + 18-week build to the Long Island Marathon on Sun May 2, 2027. Runs, strength, mobility, fueling and race-week tasks.',
     'settings': {'raceName': 'Long Island Marathon', 'raceDate': RACE.isoformat(), 'startDate': BASE_START.isoformat(), 'units': 'mi', 'weekStart': 1,
-                 'coachNotes': COACH_NOTES},
+                 'coachNotes': COACH_NOTES, 'paceZones': PACE_ZONES},
     'items': [{
         'date': i['date'], 'category': i['category'], 'title': i['title'], 'details': i['details'],
         **({'runType': i['run_type']} if i['category'] == 'run' else {}),

@@ -7,6 +7,8 @@ import { importCSV, samplePlan, CSV_TEMPLATE } from './plans.js';
 import { weeklyVolumeChart, completionBars, bindTooltips } from './charts.js';
 import { getSample, coachRun, coachError, describeChange, applyProposal, pendingProposals } from './coach.js';
 import { getMcp, syncStrava, stravaError, isSyncing } from './strava.js';
+import { renderRunning, renderStrength, renderStretching, weekPhase } from './tabs.js';
+import { renderNutrition } from './nutrition.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -17,7 +19,8 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const ui = {
   date: today(),
   month: today().slice(0, 8) + '01',
-  calMode: 'month',
+  calMode: 'season',
+  nutDate: null,
   hidden: new Set(),       // categories filtered out of the calendar
   showPast: false,
   importOpen: false,
@@ -110,10 +113,22 @@ function renderSync() {
   el.title = cloud.message || (st === 'ready' ? 'Saved to your claude.ai account' : '');
 }
 
-const VIEWS = { today: renderToday, calendar: renderCalendar, plan: renderPlan, progress: renderProgress, setup: renderSettings };
+const VIEWS = {
+  today: renderToday, plan: renderCalendar,
+  running: main => renderRunning(main, ctx()), strength: main => renderStrength(main, ctx()),
+  stretching: main => renderStretching(main, ctx()), nutrition: main => renderNutrition(main, ctx()),
+  progress: renderProgress, setup: renderSettings,
+};
+const OLD_ROUTES = { '#settings': '#setup', '#calendar': '#plan' };
+
+/** Helpers the tab modules use. */
+const ctx = () => ({
+  esc, ui, unit, route, toast, ICON_CHECK, ICON_CLOSE, itemMeta, doneDistance, plannedDistance, startOfWeek,
+  openItemDialog, openDayDialog, stravaBarHTML, runSync, bindRows: bindDayList,
+});
 
 function route() {
-  if (location.hash === '#settings') return location.replace('#setup');
+  if (OLD_ROUTES[location.hash]) return location.replace(OLD_ROUTES[location.hash]);
   const name = (location.hash.slice(1) || 'today').split('/')[0];
   const view = VIEWS[name] ? name : 'today';
   $$('.nav a').forEach(a => a.classList.toggle('active', a.getAttribute('href') === `#${view}`));
@@ -389,7 +404,49 @@ function renderToday(main) {
   });
 }
 
-// ---------- Calendar ----------
+// ---------- Plan (season, month and week views) ----------
+
+const TYPE_SHORT = { easy: 'Easy', long: 'Long', tempo: 'Tempo', intervals: 'Intervals', recovery: 'Recovery', hills: 'Hills', race: 'Race' };
+
+function seasonHTML(byDate) {
+  const r = planRange();
+  if (!r) return '<p class="empty">No plan yet. Load one in Setup.</p>';
+  const t = today(), cur = startOfWeek(t);
+  const dayNames = [...Array(7)].map((_, i) => fmtDate(addDays(r.start, i), { weekday: 'short' }));
+  let rows = '', lastPhase = null;
+  for (let w = r.start; w <= r.end; w = addDays(w, 7)) {
+    if (!ui.showPast && w < addDays(cur, -7)) continue;
+    const ph = weekPhase(w);
+    const phase = ph?.phase || 'Other';
+    if (phase !== lastPhase) { rows += `<tr class="phase-row"><th colspan="9">${esc(phase)}</th></tr>`; lastPhase = phase; }
+    const tot = weekTotals(w, byDate), wn = weekNumber(w);
+    rows += `<tr class="${w === cur ? 'is-current' : ''} ${w < cur ? 'is-past' : ''}">
+      <th class="wk" scope="row"><b>W${wn}</b><span>${esc(fmtDate(w, { month: 'short', day: 'numeric' }))}</span></th>
+      ${[...Array(7)].map((_, i) => {
+        const day = addDays(w, i), list = byDate.get(day) || [];
+        const runs = list.filter(x => x.category === 'run');
+        const str = list.some(x => x.category === 'strength');
+        const missed = day < t && runs.some(x => !x.done);
+        const label = runs.map(x => x.title).join(', ') || (list.some(x => x.category === 'rest') ? 'Rest day' : '');
+        return `<td class="${day === t ? 'is-today' : ''}" data-day="${day}" title="${esc(label)}">
+          <button class="s-cell" data-day="${day}" aria-label="${esc(`${fmtDate(day)}: ${label || 'nothing planned'}`)}">
+          ${runs.length ? runs.map(x => {
+            const d = x.done ? doneDistance(x) : plannedDistance(x);
+            return `<span class="s-run ${x.done ? 'done' : ''} ${missed && !x.done ? 'missed' : ''} ${KEY.has(x.runType) ? 'key' : ''}">
+              <b>${d ? +d.toFixed(1) : ''}</b><span>${esc(TYPE_SHORT[x.runType] || 'Run')}</span></span>`;
+          }).join('') : `<span class="s-rest">${list.some(x => x.category === 'rest') ? 'Rest' : ''}</span>`}
+          ${str ? '<span class="s-tag">Strength</span>' : ''}
+          </button></td>`;
+      }).join('')}
+      <td class="num s-miles"><b>${+tot.actual.toFixed(1)}</b><span>/ ${+tot.planned.toFixed(1)}</span></td>
+    </tr>`;
+  }
+  return `<div class="season-wrap"><table class="season">
+    <thead><tr><th>Week</th>${dayNames.map(n => `<th>${esc(n)}</th>`).join('')}<th class="num">${unit()}</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>
+    <div class="season-key muted small"><span><b class="key-swatch"></b>Key session</span><span><b class="key-swatch done"></b>Done</span><span><b class="key-swatch missed"></b>Missed</span><label class="toggle small"><input type="checkbox" id="show-past" ${ui.showPast ? 'checked' : ''}> <span>Show earlier weeks</span></label></div>`;
+}
+const KEY = new Set(['tempo', 'intervals', 'hills', 'long', 'race']);
 
 function renderCalendar(main) {
   const byDate = itemsByDate();
@@ -402,7 +459,10 @@ function renderCalendar(main) {
     `<button class="chip cat-${k} ${ui.hidden.has(k) ? 'off' : ''}" data-filter="${k}" aria-pressed="${!ui.hidden.has(k)}">${c.short}</button>`).join('');
 
   let title, body;
-  if (ui.calMode === 'month') {
+  if (ui.calMode === 'season') {
+    title = S().raceName ? `Road to ${S().raceName}` : 'Season';
+    body = seasonHTML(byDate);
+  } else if (ui.calMode === 'month') {
     const first = ui.month;
     title = fmtDate(first, { month: 'long', year: 'numeric' });
     const gridStart = startOfWeek(first);
@@ -452,21 +512,31 @@ function renderCalendar(main) {
       }).join('')}</div>`;
   }
 
+  const season = ui.calMode === 'season';
   main.innerHTML = `
+    ${proposalsHTML()}
     <div class="cal-toolbar">
       <div class="seg" role="tablist">
+        <button class="${season ? 'active' : ''}" data-mode="season">Season</button>
         <button class="${ui.calMode === 'month' ? 'active' : ''}" data-mode="month">Month</button>
         <button class="${ui.calMode === 'week' ? 'active' : ''}" data-mode="week">Week</button>
       </div>
       <div class="cal-nav">
-        <button class="icon-btn" data-step="-1" aria-label="Previous">‹</button>
+        ${season ? '' : '<button class="icon-btn" data-step="-1" aria-label="Previous">‹</button>'}
         <h2>${esc(title)}</h2>
-        <button class="icon-btn" data-step="1" aria-label="Next">›</button>
+        ${season ? '' : '<button class="icon-btn" data-step="1" aria-label="Next">›</button>'}
       </div>
-      <button class="btn small" data-step="0">Today</button>
+      <div class="btn-row tight">
+        ${season ? '' : '<button class="btn small" data-step="0">Today</button>'}
+        <button class="btn small primary" data-add="${ui.calMode === 'week' ? startOfWeek(ui.date) : today()}">+ Add</button>
+      </div>
     </div>
-    <div class="chips-row">${filters}</div>
+    ${season ? '' : `<div class="chips-row">${filters}</div>`}
     ${body}`;
+  bindProposals(main);
+  const past = $('#show-past', main);
+  if (past) past.onchange = e => { ui.showPast = e.target.checked; route(); };
+  if (season) requestAnimationFrame(() => $('.season tr.is-current', main)?.scrollIntoView({ block: 'nearest' }));
 
   main.addEventListener('click', e => {
     const el = e.target.closest('[data-mode],[data-step],[data-filter],[data-day],[data-add]');
@@ -483,7 +553,7 @@ function renderCalendar(main) {
       ui.hidden.has(k) ? ui.hidden.delete(k) : ui.hidden.add(k);
     } else if (el.dataset.add) { return openItemDialog(null, el.dataset.add); }
     else if (el.dataset.day) {
-      if (ui.calMode === 'month' || el.classList.contains('link')) return openDayDialog(el.dataset.day);
+      if (ui.calMode !== 'week' || el.classList.contains('link')) return openDayDialog(el.dataset.day);
     }
     route();
   });
@@ -698,86 +768,23 @@ function afterDialogChange() {
   else dlg.close();
 }
 
-// ---------- Plan ----------
+// ---------- Build your plan (shown in Setup) ----------
 
-function renderPlan(main) {
+function bindBuildPlan(main) {
   const items = store.get().items;
-  const t = today();
-  const byWeek = new Map();
-  [...items].sort((a, b) => a.date.localeCompare(b.date))
-    .filter(it => ui.showPast || it.date >= startOfWeek(t))
-    .forEach(it => {
-      const w = startOfWeek(it.date);
-      if (!byWeek.has(w)) byWeek.set(w, []);
-      byWeek.get(w).push(it);
-    });
-
-  main.innerHTML = `
-    <div class="page-head">
-      <h2>Training plan</h2>
-      <button class="btn primary" id="add">+ Add activity</button>
-    </div>
-
-    ${proposalsHTML()}
-
-    <section class="card">
-      <h3>Build your plan</h3>
-      <p class="muted">Add activities one at a time (with weekly repeats), import your whole plan from a spreadsheet, or start from a sample 16-week plan and edit it.</p>
-      <div class="btn-row">
-        <button class="btn" id="toggle-import">Import from spreadsheet (CSV)</button>
-        <button class="btn" id="sample">Load sample 16-week plan</button>
-        ${items.length ? `<button class="btn danger" id="clear">Clear plan</button>` : ''}
-      </div>
-      <div id="bundled"></div>
-      <div id="import" ${ui.importOpen ? '' : 'hidden'}>
-        <p class="small">Paste rows from Excel/Google Sheets or upload a .csv. Columns: <code>date</code> <em>or</em> <code>week</code> + <code>day</code>, then <code>category</code>, <code>title</code>, <code>details</code>, <code>distance</code>, <code>duration</code>, <code>run_type</code>.
-        Categories: ${Object.keys(CATEGORIES).map(k => `<code>${k}</code>`).join(' ')}. Week/day rows use your plan start date${S().startDate ? ` (${esc(fmtDate(S().startDate))})` : ' — <a href="#setup">set it in Setup</a>'}.</p>
-        <textarea id="csv" rows="8" spellcheck="false" placeholder="${esc(CSV_TEMPLATE.split('\n').slice(0, 3).join('\n'))}"></textarea>
-        <div class="btn-row">
-          <label class="btn file">Choose file…<input type="file" id="csv-file" accept=".csv,.tsv,.txt" hidden></label>
-          <button class="btn" id="template">Download template</button>
-          <button class="btn primary" id="do-import">Import</button>
-        </div>
-        <div id="import-msg">${ui.flash}</div>
-      </div>
-    </section>
-
-    <div class="page-head">
-      <h3>${ui.showPast ? 'All weeks' : 'Upcoming'} <span class="muted">(${items.length} activities total)</span></h3>
-      <label class="toggle small"><input type="checkbox" id="show-past" ${ui.showPast ? 'checked' : ''}> <span>Show past weeks</span></label>
-    </div>
-    ${byWeek.size ? [...byWeek].map(([w, list]) => {
-      const wn = weekNumber(w);
-      const planned = list.reduce((s, i) => s + plannedDistance(i), 0);
-      return `<section class="card week-block">
-        <div class="card-head"><h3>${wn && wn > 0 ? `Week ${wn} · ` : ''}${esc(fmtDate(w, { month: 'short', day: 'numeric' }))} – ${esc(fmtDate(addDays(w, 6), { month: 'short', day: 'numeric' }))}</h3>
-        ${planned ? `<span class="muted">${+planned.toFixed(1)} ${unit()}</span>` : ''}</div>
-        <ul class="plan-list">${list.map(it => `
-          <li class="cat-${it.category} ${it.done ? 'done' : ''}" data-id="${it.id}">
-            <span class="pl-date">${esc(fmtDate(it.date, { weekday: 'short', day: 'numeric' }))}</span>
-            <button class="pl-title link" data-action="edit">${esc(it.title)}${it.seriesId ? ' <span class="tag">Weekly</span>' : ''}</button>
-            <span class="pl-meta muted">${esc(itemMeta({ ...it, done: false }))}</span>
-            <span class="pl-done">${it.done ? 'Done' : ''}</span>
-          </li>`).join('')}</ul>
-      </section>`;
-    }).join('') : `<p class="empty">No activities yet. Add one, import a spreadsheet, or load the sample plan.</p>`}`;
-
-  $('#add').onclick = () => openEditDialog(null, t);
-  $('#show-past').onchange = e => { ui.showPast = e.target.checked; route(); };
   ui.flash = '';
-  $('#toggle-import').onclick = () => { ui.importOpen = $('#import').hidden; $('#import').hidden = !ui.importOpen; };
-  $('#template').onclick = () => download('marathon-plan-template.csv', CSV_TEMPLATE, 'text/csv');
-  $('#csv-file').onchange = async e => { const f = e.target.files[0]; if (f) $('#csv').value = await f.text(); };
-  $('#do-import').onclick = () => {
+  $('#toggle-import', main).onclick = () => { ui.importOpen = $('#import').hidden; $('#import').hidden = !ui.importOpen; };
+  $('#template', main).onclick = () => download('marathon-plan-template.csv', CSV_TEMPLATE, 'text/csv');
+  $('#csv-file', main).onchange = async e => { const f = e.target.files[0]; if (f) $('#csv').value = await f.text(); };
+  $('#do-import', main).onclick = () => {
     const { items: rows, errors } = importCSV($('#csv').value, S());
     const msg = `
       ${rows.length ? `<p class="ok">Imported ${rows.length} activit${rows.length === 1 ? 'y' : 'ies'}.</p>` : ''}
       ${errors.length ? `<ul class="errors">${errors.slice(0, 12).map(e => `<li>${esc(e)}</li>`).join('')}${errors.length > 12 ? `<li>…and ${errors.length - 12} more</li>` : ''}</ul>` : ''}`;
-    if (rows.length) { ui.flash = msg; ui.importOpen = errors.length > 0; store.addItems(rows); }
+    if (rows.length) { ui.flash = msg; ui.importOpen = errors.length > 0; store.addItems(rows); route(); }
     else $('#import-msg').innerHTML = msg;
   };
-  bindProposals(main);
-  $('#sample').onclick = async () => {
+  $('#sample', main).onclick = async () => {
     const extra = items.length ? 'It is added on top of your existing activities.' : '';
     if (!await confirmAction(`Load a 16-week plan ending on ${S().raceDate ? fmtDate(S().raceDate) : 'a race date 16 weeks out'}?`, extra, 'Load plan')) return;
     const { items: plan, start, raceDate } = samplePlan(S());
@@ -785,17 +792,11 @@ function renderPlan(main) {
     store.addItems(plan);
     route();
   };
-  loadBundledPlans($('#bundled'), items.length);
-  const clear = $('#clear');
+  loadBundledPlans($('#bundled', main), items.length);
+  const clear = $('#clear', main);
   if (clear) clear.onclick = async () => {
     if (await confirmAction('Delete every activity in your plan?', 'Check-ins and settings are kept. Consider exporting a backup first.', 'Delete plan', 'danger')) { store.clearItems(); route(); }
   };
-  main.addEventListener('click', e => {
-    const b = e.target.closest('[data-action="edit"]');
-    if (!b) return;
-    const it = items.find(i => i.id === b.closest('[data-id]').dataset.id);
-    if (it) openEditDialog(it);
-  });
 }
 
 /** Ready-made plans shipped in /plans (listed in plans/index.json). */
@@ -934,9 +935,32 @@ function renderSettings(main) {
         <label>Plan start date<input type="date" name="startDate" value="${esc(s.startDate)}"></label>
         <label>Units<select name="units"><option value="mi" ${s.units === 'mi' ? 'selected' : ''}>Miles</option><option value="km" ${s.units === 'km' ? 'selected' : ''}>Kilometers</option></select></label>
         <label>Week starts on<select name="weekStart"><option value="1" ${s.weekStart === 1 ? 'selected' : ''}>Monday</option><option value="0" ${s.weekStart === 0 ? 'selected' : ''}>Sunday</option></select></label>
+        <label>Body weight<input type="number" step="0.1" min="30" name="bodyWeight" value="${esc(s.bodyWeight ?? '')}" placeholder="for nutrition targets"></label>
+        <label>Weight unit<select name="weightUnit"><option value="lb" ${s.weightUnit !== 'kg' ? 'selected' : ''}>lb</option><option value="kg" ${s.weightUnit === 'kg' ? 'selected' : ''}>kg</option></select></label>
         <label class="span-all">Notes for your coach<textarea name="coachNotes" rows="7" placeholder="Goal time, pace zones, heart-rate zones, injuries, schedule constraints. Claude reads this every time it coaches a run.">${esc(s.coachNotes)}</textarea></label>
       </form>
       <p class="muted small" id="saved"></p>
+    </section>
+    <section class="card">
+      <h3>Build your plan</h3>
+      <p class="muted">Load a ready-made plan, import your own from a spreadsheet, or start from a sample 16-week plan. To add single activities, use <b>+ Add</b> on the Plan tab.</p>
+      <div id="bundled"></div>
+      <div class="btn-row">
+        <button class="btn" id="toggle-import">Import from spreadsheet (CSV)</button>
+        <button class="btn" id="sample">Load sample 16-week plan</button>
+        ${store.get().items.length ? '<button class="btn danger" id="clear">Clear plan</button>' : ''}
+      </div>
+      <div id="import" ${ui.importOpen ? '' : 'hidden'}>
+        <p class="small">Paste rows from Excel/Google Sheets or upload a .csv. Columns: <code>date</code> <em>or</em> <code>week</code> + <code>day</code>, then <code>category</code>, <code>title</code>, <code>details</code>, <code>distance</code>, <code>duration</code>, <code>run_type</code>.
+        Categories: ${Object.keys(CATEGORIES).map(k => `<code>${k}</code>`).join(' ')}. Week/day rows count from the plan start date above.</p>
+        <textarea id="csv" rows="8" spellcheck="false" placeholder="${esc(CSV_TEMPLATE.split('\n').slice(0, 3).join('\n'))}"></textarea>
+        <div class="btn-row">
+          <label class="btn file">Choose file…<input type="file" id="csv-file" accept=".csv,.tsv,.txt" hidden></label>
+          <button class="btn" id="template">Download template</button>
+          <button class="btn primary" id="do-import">Import</button>
+        </div>
+        <div id="import-msg">${ui.flash}</div>
+      </div>
     </section>
     <section class="card">
       <h3>Your data</h3>
@@ -955,10 +979,11 @@ function renderSettings(main) {
   form.addEventListener('change', () => {
     const f = Object.fromEntries(new FormData(form));
     f.coachNotes = (f.coachNotes || '').trim();
-    store.updateSettings({ ...f, weekStart: +f.weekStart });
+    store.updateSettings({ ...f, weekStart: +f.weekStart, bodyWeight: num(f.bodyWeight) });
     $('#saved').textContent = 'Saved';
     renderHeader();
   });
+  bindBuildPlan(main);
   $('#export').onclick = () => download(`marathon-backup-${today()}.json`, JSON.stringify(store.get(), null, 2), 'application/json');
   $('#export-csv').onclick = () => {
     const q = v => (v == null ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
@@ -1006,16 +1031,21 @@ store.subscribe(() => {
   const active = document.activeElement;
   renderSync();
   maybeAutoSync();
-  if (view === 'setup') {
-    if (!active?.closest('#settings, textarea, input')) route();
+  const typing = active?.closest('#view') && active.matches('input:not([type=checkbox]), textarea, select');
+  if (typing) {
+    if (active.closest('#checkin')) $('#ci-saved') && ($('#ci-saved').textContent = 'Saved');
+    ui.stale = true;
     return;
   }
-  if (active?.closest('#checkin')) { $('#ci-saved') && ($('#ci-saved').textContent = 'Saved'); return; }
   route();
   if ($('#dlg-day')) dayDialogRefresh?.();
 });
 
 dialog().addEventListener('close', () => { dayDialogRefresh = null; });
+// Catch up on changes that arrived while a field had focus.
+document.addEventListener('focusout', () => setTimeout(() => {
+  if (ui.stale && !document.activeElement?.closest('#view input, #view textarea, #view select')) { ui.stale = false; route(); }
+}, 0));
 window.addEventListener('hashchange', route);
 route();
 connectCloud();
