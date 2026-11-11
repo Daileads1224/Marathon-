@@ -151,7 +151,7 @@ BUILD = [
         ('13 mi with 10 @MP', f'MP = {MP}. Practice race fueling.', 13, 'tempo'), ('Long run — last 5 @MP', f'20 mi, last 5 @ MP {MP}.', 20, 'long'), 8, 4, 7),
     ('Tune-up', 52, ('3×1 mi @T', f'2 min jog between. T = {T}. Longer warm-up/cool-down.', 9, 'tempo'),
         ('Easy 5 + strides', f'6 × 20 s strides @ {PACE["strides"]}.', 5, 'easy'),
-        ('🏁 Tune-up half marathon', 'Target ≤ 1:31 (1:29–1:30 means 3:05–3:08 is possible). If slower than 1:32, aim for 3:15 and recheck your paces. '
+        ('Tune-up half marathon', 'Target ≤ 1:31 (1:29–1:30 means 3:05–3:08 is possible). If slower than 1:32, aim for 3:15 and recheck your paces. '
          'No half available? Run a hard 10–12 mi effort at HMP instead.\n~2 mi warm-up + 13.1 race + cool-down.', 16, 'race'), 10, 6, 6),
     ('Race-specific', 64, ('2×3 mi @T', f'3 min jog between. T = {T}.', 10, 'tempo'),
         ('12 mi with 8 @MP', f'MP = {MP}. Practice race fueling.', 12, 'tempo'), ('Long run', '20 mi easy.', 20, 'long'), 9, 6, 7),
@@ -212,7 +212,7 @@ add(sat, 'other', 'Lay out kit, gels and race breakfast', 'Nothing new on race d
 add(RACE, 'nutrition', 'Race-morning fueling',
     '3 h before: 2–3 g carbs/kg (150–225 g) — bagel, banana, jam, sports drink.\nGel 10–15 min before the start, then one every 25–30 min (6–7 gels) + sports drink at aid stations for 60–90 g/hour.\n'
     'Caffeine (optional): ~3 mg/kg (~200 mg) 1 h before, or a caffeinated gel after mile 16.')
-add(RACE, 'run', '🏁 Long Island Marathon — goal sub-3:10',
+add(RACE, 'run', 'Long Island Marathon (goal sub-3:10)',
     'Run an even race. Halfway in ~1:34:30–1:35:00.\nMiles 1–3: 7:15–7:20 (should feel too easy)\nMiles 4–13.1: 7:10–7:13\nMiles 14–20: 7:10–7:13 — stay patient, fuel on schedule\n'
     'Miles 20–26.2: 7:05–7:12 only if strong\nAim for 7:10–7:12 on the watch (GPS reads long).', 26.2, 'race')
 
@@ -225,6 +225,7 @@ Pace zones (per mile): Recovery 9:30-10:15 · Easy 8:30-9:30 (about 80% of miles
 Starting fitness (Oct 2026): 25-30 mi/week, 10K ~43:00, half ~1:35.
 Benchmarks: December 10K 42:30 or faster · Week 9 (Feb 25) 11 mi with 8 @MP feels controlled, HR steady · Week 12 (Mar 21) tune-up half 1:31 or faster · Week 15 (Apr 11) 14 mi @MP inside 18 averaging 7:10-7:15 without straining.
 Rules: keep easy days genuinely easy; never two hard days back to back; take every cutback week; missed a week to illness: repeat the previous week rather than make it up; skip a workout rather than run it hurt; under 6 h sleep: swap the workout for easy running or rest. Watch for resting HR 5+ bpm above normal, easy runs feeling hard, poor sleep, irritability: two or more means 2-3 easy days.
+Heart-rate zones (Strava, from max HR): Z1 up to 127, Z2 128-159, Z3 160-174, Z4 175-190, Z5 191+. Easy runs have mostly sat at 136-153 bpm.
 Every workout includes 1.5-2 mi warm-up and 1-2 mi cool-down. Long runs capped at about 3 hours."""
 
 plan = {

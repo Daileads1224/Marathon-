@@ -10,6 +10,8 @@ import { getMcp, syncStrava, stravaError, isSyncing } from './strava.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+const ICON_CHECK = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const ICON_CLOSE = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const ui = {
@@ -63,6 +65,7 @@ function weekTotals(weekStartIso, byDate) {
 function itemMeta(it) {
   const p = it.planned || {}, bits = [];
   if (it.category === 'run' && it.runType && RUN_TYPES[it.runType]) bits.push(RUN_TYPES[it.runType]);
+  else if (it.category !== 'run') bits.push(CATEGORIES[it.category]?.short || 'Other');
   if (p.distance) bits.push(`${p.distance} ${unit()}`);
   if (p.duration) bits.push(fmtDuration(p.duration));
   if (it.done && it.actual) {
@@ -72,7 +75,7 @@ function itemMeta(it) {
     if (a.distance && a.duration) done.push(fmtPace(a.duration, a.distance));
     if (a.hr) done.push(`${a.hr} bpm`);
     if (a.rpe) done.push(`RPE ${a.rpe}`);
-    if (done.length) bits.push(`✓ ${done.join(' · ')}`);
+    if (done.length) bits.push(`${it.category === 'run' ? 'Ran' : 'Done'} ${done.join(' · ')}`);
   }
   return bits.join(' · ');
 }
@@ -89,7 +92,7 @@ function renderHeader() {
     const total = r ? Math.ceil((daysBetween(r.start, r.end) + 1) / 7) : null;
     el.innerHTML = `
       <strong>${esc(s.raceName || 'Race day')}</strong>
-      <span>${days > 0 ? `${days} day${days === 1 ? '' : 's'} to go` : days === 0 ? 'is TODAY! 🏁' : 'complete 🎉'}</span>
+      <span>${days > 0 ? `${days} day${days === 1 ? '' : 's'} to go` : days === 0 ? 'is today' : 'complete'}</span>
       ${wk && total && wk >= 1 && wk <= total ? `<span class="pill">Week ${wk} of ${total}</span>` : ''}`;
   } else {
     el.innerHTML = `<a href="#setup">Set your race date →</a>`;
@@ -201,12 +204,12 @@ function dayListHTML(date) {
   if (!items.length) return `<p class="empty">Nothing scheduled.</p>`;
   return `<ul class="items">${items.map(it => `
     <li class="item cat-${it.category} ${it.done ? 'done' : ''}" data-id="${it.id}">
-      <button class="check" data-action="toggle" aria-label="${it.done ? 'Mark not done' : 'Mark done'}" aria-pressed="${!!it.done}">${it.done ? '✓' : ''}</button>
+      <button class="check" data-action="toggle" aria-label="${it.done ? 'Mark not done' : 'Mark done'}" aria-pressed="${!!it.done}">${it.done ? ICON_CHECK : ''}</button>
       <button class="item-body" data-action="open">
-        <span class="item-title">${CATEGORIES[it.category]?.icon || ''} ${esc(it.title)}</span>
+        <span class="item-title">${esc(it.title)}</span>
         <span class="item-meta">${esc(itemMeta(it))}</span>
         ${it.details ? `<span class="item-details">${esc(it.details)}</span>` : ''}
-        ${store.get().coaching[it.id] ? `<span class="item-coach">Coach: ${esc(store.get().coaching[it.id].headline)}</span>` : ''}
+        ${store.get().coaching[it.id] ? `<span class="item-coach">${esc(store.get().coaching[it.id].headline)}</span>` : ''}
       </button>
     </li>`).join('')}</ul>`;
 }
@@ -299,7 +302,7 @@ function stravaDetailsHTML(it) {
     <div class="zone-legend">${zones.percent.map((p, i) => `<span><i class="z z${i + 1}"></i>Z${i + 1} ${p}%</span>`).join('')}</div>` : '';
   const laps = an.laps?.length > 1 ? `<div class="table-wrap"><table class="laps">
       <thead><tr><th>Lap</th><th class="num">Dist</th><th class="num">Time</th><th class="num">Pace</th><th class="num">HR</th></tr></thead>
-      <tbody>${an.laps.map((l, i) => `<tr><td>${i + 1}</td><td class="num">${l.dist ?? ''}</td><td class="num">${esc(fmtDuration(l.time))}</td><td class="num">${esc(l.pace ?? '')}</td><td class="num">${l.hr ?? ''}</td></tr>`).join('')}</tbody>
+      <tbody>${an.laps.map((l, i) => `<tr><td>${i + 1}</td><td class="num">${l.dist ?? ''}</td><td class="num">${l.time ? `${Math.floor(l.time / 60)}:${String(Math.round(l.time % 60)).padStart(2, '0')}` : ''}</td><td class="num">${esc(l.pace ?? '')}</td><td class="num">${l.hr ?? ''}</td></tr>`).join('')}</tbody>
     </table></div>` : '';
   return `<section class="strava-detail">
     <p class="strava-head"><span class="strava-mark" aria-hidden="true">S</span> From Strava${a.stravaName ? `: ${esc(a.stravaName)}` : ''}
@@ -333,10 +336,10 @@ function renderToday(main) {
     <div class="week-strip">${[...Array(7)].map((_, i) => {
       const day = addDays(ws, i), list = byDate.get(day) || [];
       const all = list.length && list.every(x => x.done);
-      return `<button class="ws-day ${day === d ? 'sel' : ''} ${day === t ? 'is-today' : ''}" data-day="${day}">
+      return `<button class="ws-day ${day === d ? 'sel' : ''} ${day === t ? 'is-today' : ''} ${all ? 'all-done' : ''}" data-day="${day}">
         <span>${esc(fmtDate(day, { weekday: 'narrow' }))}</span>
         <b>${fromISO(day).getDate()}</b>
-        <span class="dots">${list.slice(0, 4).map(x => `<i class="dot cat-${x.category} ${x.done ? 'on' : ''}"></i>`).join('')}${all ? '✓' : ''}</span>
+        <span class="dots">${list.slice(0, 4).map(x => `<i class="dot ${x.done ? 'on' : ''}"></i>`).join('')}</span>
       </button>`;
     }).join('')}</div>
 
@@ -396,7 +399,7 @@ function renderCalendar(main) {
   const visible = it => !ui.hidden.has(it.category);
 
   const filters = Object.entries(CATEGORIES).map(([k, c]) =>
-    `<button class="chip cat-${k} ${ui.hidden.has(k) ? 'off' : ''}" data-filter="${k}" aria-pressed="${!ui.hidden.has(k)}">${c.icon} ${c.label}</button>`).join('');
+    `<button class="chip cat-${k} ${ui.hidden.has(k) ? 'off' : ''}" data-filter="${k}" aria-pressed="${!ui.hidden.has(k)}">${c.short}</button>`).join('');
 
   let title, body;
   if (ui.calMode === 'month') {
@@ -418,7 +421,8 @@ function renderCalendar(main) {
           const race = day === S().raceDate;
           return `<button class="cal-cell ${out ? 'out' : ''} ${day === t ? 'is-today' : ''} ${race ? 'race' : ''}" data-day="${day}">
             <span class="cal-num">${fromISO(day).getDate()}</span>
-            <span class="chips">${list.slice(0, 4).map(it => `<span class="cal-chip cat-${it.category} ${it.done ? 'done' : ''}" title="${esc(it.title)}"><span class="ci">${CATEGORIES[it.category]?.icon}</span><span class="ct">${esc(it.title)}</span></span>`).join('')}
+            <span class="cal-mini">${(() => { const d = list.filter(x => x.category === 'run').reduce((s, x) => s + (x.done ? doneDistance(x) : plannedDistance(x)), 0); return d ? `<b>${+d.toFixed(1)}</b>` : ''; })()}<span class="mini-dots">${list.slice(0, 5).map(x => `<i class="dot ${x.done ? 'on' : ''}"></i>`).join('')}</span></span>
+            <span class="chips">${list.slice(0, 4).map(it => `<span class="cal-chip cat-${it.category} ${it.done ? 'done' : ''}" title="${esc(it.title)}"><span class="ct">${esc(it.title)}</span></span>`).join('')}
             ${list.length > 4 ? `<span class="more">+${list.length - 4}</span>` : ''}</span>
           </button>`;
         }).join('')}
@@ -501,7 +505,7 @@ function showDialog(html, onBind) {
 function openDayDialog(date) {
   ui.date = date;
   const render = () => showDialog(`
-    <header class="dlg-head"><h2>${esc(fmtDate(date, { weekday: 'long', month: 'long', day: 'numeric' }))}</h2><button class="icon-btn" data-close aria-label="Close">✕</button></header>
+    <header class="dlg-head"><h2>${esc(fmtDate(date, { weekday: 'long', month: 'long', day: 'numeric' }))}</h2><button class="icon-btn" data-close aria-label="Close">${ICON_CLOSE}</button></header>
     <div id="dlg-day">${dayListHTML(date)}</div>
     <footer class="dlg-foot"><button class="btn" data-goto>Open day</button><button class="btn primary" data-add>+ Add activity</button></footer>`,
   dlg => {
@@ -524,8 +528,8 @@ function openLogDialog(it) {
   const isRun = it.category === 'run';
   showDialog(`
     <header class="dlg-head">
-      <h2><span class="cat-badge cat-${it.category}">${CATEGORIES[it.category]?.icon} ${CATEGORIES[it.category]?.label}</span> ${esc(it.title)}</h2>
-      <button class="icon-btn" data-close aria-label="Close">✕</button>
+      <h2><span class="cat-badge">${esc(CATEGORIES[it.category]?.label)}</span> ${esc(it.title)}</h2>
+      <button class="icon-btn" data-close aria-label="Close">${ICON_CLOSE}</button>
     </header>
     <p class="muted">${esc(fmtDate(it.date, { weekday: 'long', month: 'long', day: 'numeric' }))}${itemMeta({ ...it, done: false }) ? ' · ' + esc(itemMeta({ ...it, done: false })) : ''}</p>
     ${it.details ? `<div class="details-box">${esc(it.details)}</div>` : ''}
@@ -608,10 +612,10 @@ function openEditDialog(it, date) {
   const dow = fromISO(v.date).getDay();
   const days = [...Array(7)].map((_, i) => (S().weekStart + i) % 7);
   showDialog(`
-    <header class="dlg-head"><h2>${isNew ? 'Add activity' : 'Edit activity'}</h2><button class="icon-btn" data-close aria-label="Close">✕</button></header>
+    <header class="dlg-head"><h2>${isNew ? 'Add activity' : 'Edit activity'}</h2><button class="icon-btn" data-close aria-label="Close">${ICON_CLOSE}</button></header>
     <form id="edit-form" class="grid-form">
       <label>Date<input type="date" name="date" value="${esc(v.date)}" required></label>
-      <label>Category<select name="category">${Object.entries(CATEGORIES).map(([k, c]) => `<option value="${k}" ${k === v.category ? 'selected' : ''}>${c.icon} ${c.label}</option>`).join('')}</select></label>
+      <label>Category<select name="category">${Object.entries(CATEGORIES).map(([k, c]) => `<option value="${k}" ${k === v.category ? 'selected' : ''}>${c.label}</option>`).join('')}</select></label>
       <label class="span-all">Title<input name="title" value="${esc(v.title)}" placeholder="e.g. Long run, Lower body strength, Pre-run breakfast" required></label>
       <label class="run-only">Run type<select name="runType">${Object.entries(RUN_TYPES).map(([k, l]) => `<option value="${k}" ${k === v.runType ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label class="run-only">Distance (${unit()})<input type="number" step="0.01" min="0" name="distance" value="${esc(v.planned?.distance)}"></label>
@@ -720,8 +724,8 @@ function renderPlan(main) {
       <h3>Build your plan</h3>
       <p class="muted">Add activities one at a time (with weekly repeats), import your whole plan from a spreadsheet, or start from a sample 16-week plan and edit it.</p>
       <div class="btn-row">
-        <button class="btn" id="toggle-import">📥 Import from spreadsheet (CSV)</button>
-        <button class="btn" id="sample">✨ Load sample 16-week plan</button>
+        <button class="btn" id="toggle-import">Import from spreadsheet (CSV)</button>
+        <button class="btn" id="sample">Load sample 16-week plan</button>
         ${items.length ? `<button class="btn danger" id="clear">Clear plan</button>` : ''}
       </div>
       <div id="bundled"></div>
@@ -751,9 +755,9 @@ function renderPlan(main) {
         <ul class="plan-list">${list.map(it => `
           <li class="cat-${it.category} ${it.done ? 'done' : ''}" data-id="${it.id}">
             <span class="pl-date">${esc(fmtDate(it.date, { weekday: 'short', day: 'numeric' }))}</span>
-            <button class="pl-title link" data-action="edit">${CATEGORIES[it.category]?.icon} ${esc(it.title)} ${it.seriesId ? '<span class="muted" title="Repeats weekly">↻</span>' : ''}</button>
+            <button class="pl-title link" data-action="edit">${esc(it.title)}${it.seriesId ? ' <span class="tag">Weekly</span>' : ''}</button>
             <span class="pl-meta muted">${esc(itemMeta({ ...it, done: false }))}</span>
-            <span>${it.done ? '✓' : ''}</span>
+            <span class="pl-done">${it.done ? 'Done' : ''}</span>
           </li>`).join('')}</ul>
       </section>`;
     }).join('') : `<p class="empty">No activities yet. Add one, import a spreadsheet, or load the sample plan.</p>`}`;
@@ -866,7 +870,7 @@ function renderProgress(main) {
 
   const catRows = Object.entries(CATEGORIES).map(([key, c]) => {
     const list = past.filter(i => i.category === key);
-    return { key, label: c.label, icon: c.icon, done: list.filter(i => i.done).length, total: list.length };
+    return { key, label: c.label, done: list.filter(i => i.done).length, total: list.length };
   }).filter(r => r.total);
 
   const recent = runs.filter(i => i.date <= t).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 12);
@@ -940,8 +944,8 @@ function renderSettings(main) {
         ? 'Your plan, logs and coaching are saved privately to your claude.ai account and show up on every device where you open this page. Claude can read them to coach you.'
         : 'Everything is stored privately in this browser on this device. Export a backup regularly, and use it to move your plan to another phone or computer.'}</p>
       <div class="btn-row">
-        <button class="btn" id="export">⬇️ Export backup (JSON)</button>
-        <label class="btn file">⬆️ Restore backup<input type="file" id="restore" accept=".json,application/json" hidden></label>
+        <button class="btn" id="export">Export backup (JSON)</button>
+        <label class="btn file">Restore backup<input type="file" id="restore" accept=".json,application/json" hidden></label>
         <button class="btn" id="export-csv">Export plan as CSV</button>
         <button class="btn danger" id="reset">Erase everything</button>
       </div>
@@ -952,7 +956,7 @@ function renderSettings(main) {
     const f = Object.fromEntries(new FormData(form));
     f.coachNotes = (f.coachNotes || '').trim();
     store.updateSettings({ ...f, weekStart: +f.weekStart });
-    $('#saved').textContent = 'Saved ✓';
+    $('#saved').textContent = 'Saved';
     renderHeader();
   });
   $('#export').onclick = () => download(`marathon-backup-${today()}.json`, JSON.stringify(store.get(), null, 2), 'application/json');
@@ -1006,7 +1010,7 @@ store.subscribe(() => {
     if (!active?.closest('#settings, textarea, input')) route();
     return;
   }
-  if (active?.closest('#checkin')) { $('#ci-saved') && ($('#ci-saved').textContent = 'Saved ✓'); return; }
+  if (active?.closest('#checkin')) { $('#ci-saved') && ($('#ci-saved').textContent = 'Saved'); return; }
   route();
   if ($('#dlg-day')) dayDialogRefresh?.();
 });

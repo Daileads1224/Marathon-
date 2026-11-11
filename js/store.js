@@ -15,14 +15,14 @@
 const KEY = 'marathon-planner-v1';
 
 export const CATEGORIES = {
-  run:       { label: 'Run',               icon: '🏃' },
-  strength:  { label: 'Strength',          icon: '🏋️' },
-  mobility:  { label: 'Stretch & Mobility', icon: '🧘' },
-  nutrition: { label: 'Nutrition',         icon: '🥗' },
-  cross:     { label: 'Cross-training',    icon: '🚴' },
-  recovery:  { label: 'Recovery',          icon: '🧊' },
-  rest:      { label: 'Rest',              icon: '💤' },
-  other:     { label: 'Other',             icon: '📌' },
+  run:       { label: 'Run',               short: 'Run' },
+  strength:  { label: 'Strength',          short: 'Strength' },
+  mobility:  { label: 'Stretch & Mobility', short: 'Mobility' },
+  nutrition: { label: 'Nutrition',         short: 'Fuel' },
+  cross:     { label: 'Cross-training',    short: 'Cross' },
+  recovery:  { label: 'Recovery',          short: 'Recovery' },
+  rest:      { label: 'Rest',              short: 'Rest' },
+  other:     { label: 'Other',             short: 'Other' },
 };
 
 export const RUN_TYPES = {

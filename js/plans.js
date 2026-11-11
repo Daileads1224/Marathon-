@@ -148,6 +148,6 @@ export function samplePlan(settings) {
   }
   // Race week: carb load, then the race itself on race day (whatever weekday it falls on).
   [3, 2, 1].forEach(n => items.push({ date: addDays(raceDate, -n), category: 'nutrition', title: 'Carb load', details: '8–10 g carbs per kg body weight; keep fiber low; hydrate' }));
-  items.push({ date: raceDate, category: 'run', runType: 'race', title: `🏁 ${settings.raceName || 'Race day'}`, details: 'Trust the training. Start conservative, fuel early.', planned: { distance: d(26.2) } });
+  items.push({ date: raceDate, category: 'run', runType: 'race', title: settings.raceName || 'Race day', details: 'Trust the training. Start conservative, fuel early.', planned: { distance: d(26.2) } });
   return { items, start, raceDate };
 }

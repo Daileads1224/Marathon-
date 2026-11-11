@@ -39,7 +39,7 @@ export function weeklyVolumeChart(weeks, unit, width = 640) {
     const pw = Math.max(4, bw - 6), aw = Math.max(3, pw * 0.5);
     const tip = `<b>Week ${i + 1}</b> · ${esc(fmtDate(w.start, { month: 'short', day: 'numeric' }))}<br>Planned: ${+w.planned.toFixed(1)} ${unit}<br>Completed: ${+w.actual.toFixed(1)} ${unit}`;
     const label = (i % Math.ceil(weeks.length / 12) === 0 || w.isCurrent)
-      ? `<text x="${x0 + bw / 2}" y="${H - 10}" class="tick ${w.isCurrent ? 'current' : ''}" text-anchor="middle">${w.isCurrent ? '▲' : i + 1}</text>` : '';
+      ? `<text x="${x0 + bw / 2}" y="${H - 10}" class="tick ${w.isCurrent ? 'current' : ''}" text-anchor="middle">${i + 1}</text>${w.isCurrent ? `<circle cx="${x0 + bw / 2}" cy="${H - 2}" r="2.5" class="now-dot"/>` : ''}` : '';
     return `
       <path d="${bar(x0 + 3, pw, w.planned)}" class="bar-planned"/>
       <path d="${bar(x0 + 3 + (pw - aw) / 2, aw, w.actual)}" class="bar-actual"/>
@@ -48,7 +48,7 @@ export function weeklyVolumeChart(weeks, unit, width = 640) {
   }).join('');
 
   return `
-    <div class="legend"><span><i class="sw sw-planned"></i>Planned</span><span><i class="sw sw-actual"></i>Completed</span><span class="muted">▲ this week</span></div>
+    <div class="legend"><span><i class="sw sw-planned"></i>Planned</span><span><i class="sw sw-actual"></i>Completed</span><span><i class="sw sw-now"></i>This week</span></div>
     <div class="chart-scroll"><svg class="chart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Weekly ${unit} planned versus completed">${grid}${bars}</svg></div>`;
 }
 
@@ -58,7 +58,7 @@ export function completionBars(rows) {
   return `<div class="hbars">${rows.map(r => {
     const pct = r.total ? Math.round((r.done / r.total) * 100) : 0;
     return `<div class="hbar" data-tip="${esc(`<b>${r.label}</b><br>${r.done} of ${r.total} done (${pct}%)`)}">
-      <span class="hbar-label">${r.icon} ${esc(r.label)}</span>
+      <span class="hbar-label">${esc(r.label)}</span>
       <span class="hbar-track"><span class="hbar-fill cat-${r.key}" style="width:${pct}%"></span></span>
       <span class="hbar-val">${pct}%</span>
     </div>`;
